@@ -29,14 +29,13 @@ import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from dsv import data as D, pitchcontrol as PC, viz as V  # noqa: E402
+from dsv import data as D, metrics as M, pitchcontrol as PC, viz as V  # noqa: E402
 
 MATCH_ID = int(os.environ.get("MATCH_ID", "1925299"))
 DATA_DIR = Path(os.environ.get("DSV_DATA_DIR", ROOT / "data"))
 FIGS, REPORTS, DERIVED = ROOT / "figs", ROOT / "reports", DATA_DIR / "derived"
 FIGS.mkdir(exist_ok=True); REPORTS.mkdir(exist_ok=True)
-GRID = PC.make_grid()
-THIRD = 105.0 / 3
+GRID = PC.make_grid()  # replaced in main() by the focal match's pitch size
 
 
 def load_match(mid):
@@ -46,14 +45,15 @@ def load_match(mid):
     return meta, D.add_velocity(players), ball, D.load_events(md, mid)
 
 
-def frame_context(players, ball):
+def frame_context(players, ball, meta):
     """Per-frame detected count and whether the ball is in the defending
     team's own third (home defends -x)."""
+    half, third = meta.pitch_length / 2, meta.pitch_length / 3
     ctx = ball.set_index("frame")[["bx", "by", "ball_detected", "possession_group"]].copy()
     ctx["n_detected"] = players.groupby("frame")["is_detected"].sum()
     home_def = ctx["possession_group"] == "away team"
     away_def = ctx["possession_group"] == "home team"
-    ctx["def_third"] = (home_def & (ctx["bx"] < -105 / 2 + THIRD)) | (away_def & (ctx["bx"] > 105 / 2 - THIRD))
+    ctx["def_third"] = (home_def & (ctx["bx"] < -half + third)) | (away_def & (ctx["bx"] > half - third))
     return ctx
 
 
@@ -136,54 +136,22 @@ def loo_figure(players, ball, meta, vm, frame):
     return sup.rename(index=roles), t_loo
 
 
-def pass_destinations(events, ball, meta):
-    """Completed and failed passes with the ball's destination: the ball
-    position at the start of the next player possession (either team), if it
-    starts within 5 s of the pass in the same period."""
-    pp = events[events["event_type"] == "player_possession"].sort_values("frame_start")
-    nxt = pp[["frame_start", "period"]].shift(-1)
-    pp = pp.assign(next_frame=nxt["frame_start"], next_period=nxt["period"])
-    ps = pp[(pp["end_type"] == "pass") & pp["pass_outcome"].isin(["successful", "unsuccessful"])
-            & (pp["next_period"] == pp["period"])
-            & (pp["next_frame"] - pp["frame_end"]).between(1, 50)].copy()
-    b = ball.set_index("frame")[["bx", "by"]]
-    ps[["dest_x", "dest_y"]] = b.reindex(ps["next_frame"].astype(int)).to_numpy()
-    ps["passer_home"] = ps["team_id"] == meta.home_team_id
-    ps["success"] = ps["pass_outcome"] == "successful"
-    return ps.dropna(subset=["dest_x"])
-
-
-def control_at(state, x, y):
-    """Passing-team-agnostic per-team control at a single point."""
-    g = PC.Grid(np.array([x]), np.array([y]))
-    return PC.pitch_control(state, g)
-
-
-def auc(y, p):
-    y, p = np.asarray(y, bool), np.asarray(p, float)
-    ranks = pd.Series(p).rank().to_numpy()
-    n1, n0 = y.sum(), (~y).sum()
-    return (ranks[y].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)
-
-
 def pass_calibration(ids, vmax_variants):
+    """Passing team's control at each pass's destination, per vmax variant,
+    with the literature parameters (dsv.data.passes_with_destination)."""
     rows = []
     for mid in ids:
         meta, players, ball, events = load_match(mid)
-        ps = pass_destinations(events, ball, meta)
-        ps = ps[ps["frame_end"].isin(set(players["frame"]))]  # drop dead-ball pass frames
-        frames = set(ps["frame_end"].astype(int))
-        pf = players[players["frame"].isin(frames)]
-        bf = ball[ball["frame"].isin(frames)]
-        for _, p in ps.iterrows():
-            for name, vt in vmax_variants.items():
-                vm = PC.vmax_lookup(vt, mid) if vt is not None else {}
-                s = PC.frame_state(pf, bf, int(p["frame_end"]), meta, vm)
-                r = control_at(s, p["dest_x"], p["dest_y"])
-                rows.append(dict(match_id=mid, variant=name, success=p["success"],
-                                 pc=float(r.team(bool(p["passer_home"]))[0, 0])))
+        ps = D.passes_with_destination(events, ball, meta)
+        home = ps["passer_home"].to_numpy()
+        for name, vt in vmax_variants.items():
+            vm = PC.vmax_lookup(vt, mid) if vt is not None else {}
+            batch = PC.point_batch(players, ball, ps["frame_end"], ps[["dest_x", "dest_y"]], meta, vm)
+            pc = PC.team_control_at_points(batch, home)
+            rows.append(pd.DataFrame(dict(match_id=mid, variant=name,
+                                          success=ps["success"].to_numpy(), pc=pc)))
         print(f"  passes {mid}: {len(ps)}")
-    return pd.DataFrame(rows)
+    return pd.concat(rows, ignore_index=True)
 
 
 def calibration_figure(cal):
@@ -217,7 +185,8 @@ def extrapolated_control_stats(players, ball, meta, vm, ctx, n=200, seed=0):
         ext = dc[:, ~s.detected[d]].sum(axis=1)
         tot = dc.sum(axis=1)
         near = np.hypot(cells[:, 0] - s.ball[0], cells[:, 1] - s.ball[1]) < 20
-        own3 = (cells[:, 0] < -105 / 2 + THIRD) if dh else (cells[:, 0] > 105 / 2 - THIRD)
+        half, third = meta.pitch_length / 2, meta.pitch_length / 3
+        own3 = (cells[:, 0] < -half + third) if dh else (cells[:, 0] > half - third)
         out.append(dict(
             frame=fr, def_third=bool(ctx.loc[fr, "def_third"]),
             near_ball=ext[near].sum() / max(tot[near].sum(), 1e-9),
@@ -232,7 +201,9 @@ def main():
     vt = PC.vmax_table(v95)
     meta, players, ball, events = load_match(MATCH_ID)
     vm = PC.vmax_lookup(vt, MATCH_ID)
-    ctx = frame_context(players, ball)
+    global GRID
+    GRID = PC.make_grid(meta.pitch_length, meta.pitch_width)
+    ctx = frame_context(players, ball, meta)
 
     frames = pick_frames(ctx, events, meta)
     sample_frame_figure(players, ball, meta, vm, frames)
@@ -241,7 +212,7 @@ def main():
     print("sample frames, LOO, extrapolation stats done")
 
     raw = v95.assign(vmax=v95["v95"])
-    variants = {"uniform 5 m/s": None, "raw v95": raw, "v95, group floor, GK 5 m/s": vt}
+    variants = {"uniform 5 m/s": None, "raw v95": raw, "v95, group floor": vt}
     ids = [i for i in D.list_open_matches(DATA_DIR)
            if (DATA_DIR / "matches" / str(i) / f"{i}_tracking_extrapolated.jsonl").exists()]
     cal_csv = DERIVED / "w2_pass_calibration.csv"
@@ -257,7 +228,7 @@ def main():
     summ = []
     for name, g in cal.groupby("variant", sort=False):
         p = g["pc"].clip(eps, 1 - eps); y = g["success"]
-        summ.append(dict(variant=name, n=len(g), auc=auc(y, p),
+        summ.append(dict(variant=name, n=len(g), auc=M.auc(y, p),
                          brier=float(((p - y) ** 2).mean()),
                          logloss=float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean()),
                          pc_success=g.loc[y, "pc"].mean(), pc_fail=g.loc[~y, "pc"].mean()))
@@ -273,13 +244,15 @@ def main():
     w(f"- Spearman time-to-intercept: t_react {p.t_react} s, sigma {p.sigma} s, lambda {p.lam}/s "
       f"(goalkeepers x{p.lam_gk_mult}), ball speed {p.ball_speed} m/s, integrated for "
       f"{p.t_max} s after the ball arrives, dT {p.dt} s, stop when all cells reach "
-      f"{1 - p.tol:.0%} control. 1 m grid (105 x 68).")
+      f"{1 - p.tol:.0%} control. 1 m grid ({meta.pitch_length:g} x {meta.pitch_width:g}, "
+      f"the match's own pitch size).")
     w("- Each dT step is integrated exactly (exponential decay of the uncontrolled share), "
       "so total control never exceeds 1. Plain Euler overshoots on cells several players "
       "reach before the ball.")
     w("- vmax per player and half: v95 from detected runs, floored at the 25th percentile of "
-      "the player's position group across all 20 matches. Goalkeepers use 5 m/s: their v95 "
-      "(about 3 m/s) reflects how little they move, while their 99.9th-percentile speed is about 6 m/s.")
+      "the player's position group across all 20 matches; goalkeepers keep their own v95 "
+      "(about 3 m/s). Overriding keepers to 5 m/s, as first planned, predicts passes worse "
+      "(w2_parameter_fit.md).")
     g = vt.groupby("group")[["v95", "vmax_floor", "vmax"]].mean().round(2)
     w("\n| group | mean v95 | floor | mean vmax |\n|---|---|---|---|")
     for grp, r in g.iterrows():
@@ -307,17 +280,18 @@ def main():
     for _, r in summ.iterrows():
         w(f"| {r['variant']} | {r['n']:,} | {r['auc']:.3f} | {r['brier']:.3f} | {r['logloss']:.3f} "
           f"| {r['pc_success']:.2f} | {r['pc_fail']:.2f} |")
-    ours = cal[cal["variant"] == "v95, group floor, GK 5 m/s"]
+    ours = cal[cal["variant"] == "v95, group floor"]
     mid = ours[ours["pc"].between(0.4, 0.6)]
     w(f"\n- The surface separates completed from failed passes well, but it is underconfident "
       f"in the middle: passes to a destination with 40-60% control complete "
       f"{mid['success'].mean():.0%} of the time (n={len(mid):,}). Some of this is selection "
       f"(passers pick targets they expect to reach), but it also suggests the default "
-      f"parameters give defenders too much reach. Next: fit t_react, sigma and lambda on these "
-      f"passes with leave-one-match-out CV.")
-    w("- Per-player vmax barely changes pass calibration. It is kept because it decides *who* "
-      "covers a region, which matters for attribution rather than pass outcomes; the Week 5 "
-      "sensitivity check should re-test it.")
+      f"parameters are off for this data. They are refitted on these passes in "
+      f"[w2_parameter_fit.md](w2_parameter_fit.md).")
+    w("- With these literature parameters, per-player vmax barely moves AUC; its gain shows in "
+      "log loss (table above) and is larger once the parameters are fitted. See "
+      "[w2_parameter_fit.md](w2_parameter_fit.md), which supersedes this section for parameter "
+      "choices.")
     w("\nSee [figs/w2_pass_calibration.png](../figs/w2_pass_calibration.png).\n")
 
     w("## How much defending control is extrapolated?")

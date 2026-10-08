@@ -334,6 +334,8 @@ def compute_v95(
     v95["position_group"] = v95["player_id"].map(
         lambda i: meta.players[i].position_group if i in meta.players else None
     )
+    v95["group"] = v95["player_id"].map(lambda i: player_group(meta, i))
+    v95["match_id"] = meta.match_id
     return v95
 
 
@@ -571,3 +573,36 @@ def event_alignment(
         "possession_ball_dist_by_lag": lag_dist,
         "best_lag_frames": min(lag_dist, key=lag_dist.get),
     }
+
+
+def passes_with_destination(
+    events: pd.DataFrame, ball_df: pd.DataFrame, meta: MatchMeta, max_gap_frames: int = 50,
+) -> pd.DataFrame:
+    """Completed and failed passes with where the ball actually went.
+
+    A pass is a player_possession ending in a pass with outcome successful or
+    unsuccessful. Its destination is the tracked ball position at the start
+    of the next player possession (either team), kept only if that starts in
+    the same period within `max_gap_frames` (default 5 s) and both frames have
+    tracking. Passes that go out of play, or whose next possession starts
+    later, are dropped. Coordinates are the direction-normalized frame of
+    `ball_df`. Adds: dest_x, dest_y, next_frame, passer_home, success,
+    pass_length (ball at release to destination, m).
+    """
+    pp = events[events["event_type"] == "player_possession"].sort_values("frame_start")
+    nxt = pp[["frame_start", "period"]].shift(-1)
+    pp = pp.assign(next_frame=nxt["frame_start"], next_period=nxt["period"])
+    ps = pp[(pp["end_type"] == "pass")
+            & pp["pass_outcome"].isin(["successful", "unsuccessful"])
+            & (pp["next_period"] == pp["period"])
+            & (pp["next_frame"] - pp["frame_end"]).between(1, max_gap_frames)].copy()
+    b = ball_df.set_index("frame")[["bx", "by"]]
+    tracked = set(b.index)
+    ps = ps[ps["frame_end"].isin(tracked) & ps["next_frame"].isin(tracked)].copy()
+    ps["next_frame"] = ps["next_frame"].astype(int)
+    ps[["dest_x", "dest_y"]] = b.reindex(ps["next_frame"]).to_numpy()
+    rel = b.reindex(ps["frame_end"]).to_numpy()
+    ps["pass_length"] = np.hypot(ps["dest_x"] - rel[:, 0], ps["dest_y"] - rel[:, 1])
+    ps["passer_home"] = ps["team_id"] == meta.home_team_id
+    ps["success"] = ps["pass_outcome"] == "successful"
+    return ps.dropna(subset=["dest_x", "dest_y"])

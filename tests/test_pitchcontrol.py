@@ -84,3 +84,19 @@ def test_vmax_table_floor_and_goalkeeper():
     vt = PC.vmax_table(v95, floor_quantile=0.5, gk_vmax=5.0)
     assert vt["vmax"].tolist() == [5.0, 5.0, 6.0, 5.0]
     assert PC.vmax_lookup(vt, 1)[(1, 1)] == 5.0
+
+
+def test_vmax_table_shipped_floors_and_keepers_own_v95():
+    v95 = pd.DataFrame({
+        "match_id": 1, "player_id": [1, 2, 3], "period": 1,
+        "v95": [4.0, 5.5, 3.0], "group": ["Central Defender", "Central Defender", "Goalkeeper"],
+    })
+    vt = PC.vmax_table(v95, floors=PC.SKILLCORNER_VMAX_FLOORS)
+    assert vt["vmax"].tolist() == [4.72, 5.5, 3.0]   # CB floored; keeper keeps own v95
+    assert PC.vmax_table(v95, floor_quantile=None)["vmax"].tolist() == [4.0, 5.5, 3.0]
+
+
+def test_shipped_parameter_sets():
+    assert PC.SPEARMAN_SHAW == PC.PCParams()
+    assert PC.SKILLCORNER_OPEN_DATA.sigma_extrap > PC.SKILLCORNER_OPEN_DATA.sigma
+    assert PC.SKILLCORNER_OPEN_DATA_NO_FLAGS.sigma_extrap is None
