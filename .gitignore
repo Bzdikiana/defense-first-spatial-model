@@ -1,0 +1,7 @@
+# raw SkillCorner downloads (~1.8 GB) and derived tables; rebuild with scripts/00_fetch_data.py
+data/
+
+__pycache__/
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
