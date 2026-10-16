@@ -10,8 +10,10 @@ Week 3: the danger surface V(x) and the accessibility weight A(x | ball).
 2. Ball-transition model (where the ball goes next): isotropic Gaussian
    (Spearman-style), forward-shifted Gaussian, and 2- and 3-component mixtures,
    compared by held-out log-likelihood (match-grouped 5-fold CV).
-3. One frame decomposed: attacking control (fitted parameters, offside
-   attackers excluded) x danger x accessibility = Threat Conceded density.
+3. One frame decomposed: attacking control (fitted parameters) x danger x
+   accessibility = Threat Conceded density.
+4. Offside check: do tracking positions at the pass frame reproduce the
+   referee's offside calls? (They do not, which is why TC has no offside rule.)
 
 Run from the repo root:  py scripts/05_value.py   (after 03 and 04)
 """
@@ -147,7 +149,8 @@ def main():
     xt_figure(xt, singh)
     transition_figure(best, iso)
     frame_info = decomposition_figure(xt, best)
-    write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, frame_info)
+    off = offside_check()
+    write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, frame_info, off)
     print(xt_val.round(4).to_string(index=False))
     print(tr_table.round(4).to_string(index=False))
 
@@ -199,8 +202,7 @@ def decomposition_figure(xt, trans):
     frame = int(cand.idxmax())
     s = PC.frame_state(players, ball, frame, meta, vmax, params)
     att_home = bool(s.attacking_home)
-    off = V.offside_players(s, meta, att_home)
-    pc = PC.pitch_control(s, grid, params, exclude=off)
+    pc = PC.pitch_control(s, grid, params)
     sgn = 1.0 if att_home else -1.0
     flip = (lambda a: a) if att_home else (lambda a: a[::-1, ::-1])  # noqa: E731
     vsurf = flip(V.zone_surface(xt, grid, meta.pitch_length, meta.pitch_width))
@@ -218,15 +220,45 @@ def decomposition_figure(xt, trans):
         VZ.plot_surface(ax, grid, z, cmap=cmap, vmin=0, vmax=vm, alpha=0.9)
         VZ.plot_players(ax, s, arrows=False)
         ax.set_title(title, fontsize=9)
-    for j in np.flatnonzero(off):
-        axes[0].annotate("offside", s.pos[j], xytext=(4, -9), textcoords="offset points", fontsize=7)
     fig.suptitle(f"{meta.home_name} vs {meta.away_name}, frame {frame}: "
                  f"{'home' if att_home else 'away'} attacking; {int(det[frame])}/22 detected", fontsize=10)
     fig.tight_layout(); fig.savefig(FIGS / "w3_tc_decomposition.png", dpi=120); plt.close(fig)
-    return dict(frame=frame, tc=tc, n_offside=int(off.sum()), detected=int(det[frame]))
+    return dict(frame=frame, tc=tc, detected=int(det[frame]))
 
 
-def write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, info):
+def offside_check() -> pd.DataFrame:
+    """For passes to a receiver in the opponents' half, called offside vs
+    completed: is the intended receiver (or any attacker) in an offside
+    position in the tracking at the pass frame?"""
+    cache = DERIVED / "offside_check.csv"
+    if cache.exists() and not os.environ.get("REBUILD"):
+        return pd.read_csv(cache)
+    rows = []
+    for mid in D.list_open_matches(DATA_DIR):
+        md = DATA_DIR / "matches" / str(mid)
+        meta = D.load_match_metadata(md, mid)
+        ev = D.load_events(md, mid)
+        pl, ball = D.normalize_direction(*D.load_tracking(md, mid, meta), meta)
+        pp = ev[(ev["event_type"] == "player_possession") & (ev["end_type"] == "pass")
+                & ev["pass_outcome"].isin(["offside", "successful"]) & ev["player_targeted_id"].notna()]
+        pp = pp[pp["frame_end"].isin(set(ball["frame"]))]
+        plf = pl[pl["frame"].isin(set(pp["frame_end"]))].assign(vx=0.0, vy=0.0)
+        for _, e in pp.iterrows():
+            s = PC.frame_state(plf, ball, int(e["frame_end"]), meta)
+            att_home = bool(e["team_id"] == meta.home_team_id)
+            j = np.flatnonzero(s.player_id == int(e["player_targeted_id"]))
+            if not len(j) or (1.0 if att_home else -1.0) * s.pos[j[0], 0] <= 0:
+                continue
+            off = V.offside_players(s, meta, att_home)
+            rows.append(dict(match_id=mid, called_offside=e["pass_outcome"] == "offside",
+                             receiver_offside=bool(off[j[0]]), any_offside=bool(off.any()),
+                             receiver_detected=bool(s.detected[j[0]])))
+    out = pd.DataFrame(rows)
+    out.to_csv(cache, index=False)
+    return out
+
+
+def write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, info, off):
     L = []
     w = L.append
     w("# Week 3: danger and accessibility\n")
@@ -282,21 +314,32 @@ def write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, 
     w("![transition](../figs/w3_transition.png)\n")
 
     w("## Putting it together on one frame\n")
-    w("Attacking control uses `SKILLCORNER_OPEN_DATA` with attackers in offside positions (in the "
-      "opponents' half, ahead of the ball and of the second-last defender) left out. Threat Conceded for "
-      "the frame is the sum over cells of control x V x A. A sums to 1, so TC is the expected xT of where "
-      "the ball goes next, counted only where the attack would control it.\n")
-    w(f"Frame {info['frame']} ({info['detected']}/22 players detected, {info['n_offside']} attacker(s) "
-      f"offside): TC = {info['tc']:.4f} xT.\n")
+    w("Attacking control uses `SKILLCORNER_OPEN_DATA`. Threat Conceded for the frame is the sum over "
+      "cells of control x V x A. A sums to 1, so TC is the expected xT of where the ball goes next, "
+      "counted only where the attack would control it.\n")
+    w(f"Frame {info['frame']} ({info['detected']}/22 players detected): TC = {info['tc']:.4f} xT.\n")
     w("![decomposition](../figs/w3_tc_decomposition.png)\n")
+    w("## Why Threat Conceded has no offside rule\n")
+    w("A natural refinement is to drop attackers in offside positions (in the opponents' half, ahead of "
+      "the ball and of the second-last defender) from attacking control. Checked against the referee, "
+      "for passes to a receiver in the opponents' half, using positions at the pass frame:\n")
+    w("| passes | n | receiver in offside position | any attacker in offside position |")
+    w("|---|---|---|---|")
+    for called, lab in ((True, "called offside"), (False, "completed")):
+        g = off[off["called_offside"] == called]
+        w(f"| {lab} | {len(g):,} | {g['receiver_offside'].mean():.1%} | {g['any_offside'].mean():.1%} |")
+    cd = off[off["called_offside"] & off["receiver_detected"]]
+    w(f"\nBroadcast tracking cannot place players precisely enough along the pitch to judge offside, "
+      f"which is decided by centimetres: even when the receiver was detected, the tracking puts them in an "
+      f"offside position in {cd['receiver_offside'].mean():.0%} of called offsides (n={len(cd)}). A hard "
+      "rule would mostly remove the wrong players, so TC leaves offside out. The cost is that a genuinely "
+      "offside attacker sometimes counts toward control, slightly overstating space in behind.\n")
 
     w("## Caveats\n")
     w("- xT is fitted on 20 matches; zones far from goal rest on many actions, zones in the box on few. "
       "The xG-based shot value keeps those zones stable.")
     w("- The transition model ignores who has the ball and the game state; Week 4 can test whether "
       "conditioning on phase of play helps.")
-    w("- Offside uses the frame's positions as they are, including extrapolated ones, so a mistracked "
-      "last defender can flip an attacker's status.")
     w("- V is the value of the ball being at x for the team in possession; TC does not yet account for "
       "what the attack does after reaching x beyond that.\n")
     w("Outputs: `data/derived/value_fit.json` (xT grid, transition parameters).")

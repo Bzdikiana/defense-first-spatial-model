@@ -125,8 +125,6 @@ StatsBomb data is used under its open-data terms, with attribution
   (76% short and centred on the ball, 24% long and about 18 m forward) beats the single
   Gaussian used in Spearman-style models on held-out log-likelihood in all 20 matches.
 
-`offside_players` flags attackers in offside positions so they can be left out of pitch
-control (`pitch_control(..., exclude=...)`).
 
 ## SkillCorner open data: things to know
 
@@ -141,6 +139,12 @@ Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_
   about 46% and of goalkeepers 15–20%, but when their team is defending with the ball in its
   own third it is 90% and 63%. Condition on game situation before concluding a position is
   unusable.
+- **You cannot judge offside from it.** For the 51 passes called offside to a receiver in the
+  opponents' half, the tracking puts that receiver in an offside position at the pass frame
+  only 12% of the time (6% even when the receiver was detected), while 1.5% of completed
+  passes look offside. Offside is decided by centimetres; broadcast positions along the pitch
+  are not that precise. Threat Conceded therefore has no offside rule
+  ([reports/w3_value.md](reports/w3_value.md)).
 - **Some frames have no detections at all** (replays, camera cuts) while the ball is still
   flagged as detected.
 - **Goalkeepers have no position group of their own.** They are `position_group == "Other"`
@@ -184,7 +188,7 @@ py -m pytest
 | `dsv/data.py` | fetch, parse tracking / events / phases, direction normalization, kinematics, v95, coverage audit, event alignment, passes with destinations |
 | `dsv/pitchcontrol.py` | Spearman pitch control (grid and batched points), per-player vmax, detection-aware uncertainty, renormalized leave-one-out, parameter fitting |
 | `dsv/xg.py` | xG model: shared shot features for StatsBomb and SkillCorner, fitted coefficients |
-| `dsv/value.py` | expected threat, next-ball-location model, offside, fitted surfaces |
+| `dsv/value.py` | expected threat, next-ball-location model, fitted surfaces |
 | `dsv/metrics.py` | log loss, Brier, AUC, calibration error, logistic baseline |
 | `dsv/viz.py` | pitch, player and surface plots |
 | `dsv/threat.py` | Week 4: Threat Conceded and aggregation |

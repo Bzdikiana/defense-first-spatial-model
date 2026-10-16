@@ -8,7 +8,7 @@ The two weights Threat Conceded puts on the attacking team's pitch control:
 - A(x | ball), accessibility: where the ball goes next given where it is now
   (Spearman 2017's transition model), fitted on SkillCorner possession changes.
 
-plus offside positions, which get no attacking control.
+plus offside positions, for checking only (see `offside_players`).
 
 Frames: zone grids are in the attacking team's frame normalized to [0, 1]
 (x = 1 is the goal being attacked). Pitch surfaces use dsv.pitchcontrol.Grid
@@ -255,7 +255,11 @@ OPEN_DATA_TRANSITION = TransitionModel(
 def offside_players(state, meta: MatchMeta, attacking_home: bool) -> np.ndarray:
     """(n,) True for attackers in an offside position: in the opponents'
     half, ahead of the ball and ahead of the second-last defender (keeper
-    included). Uses the frame's positions as they are, extrapolated or not."""
+    included). Uses the frame's positions as they are, extrapolated or not.
+
+    Not used in Threat Conceded: on SkillCorner broadcast tracking it rarely
+    agrees with the referee (reports/w3_value.md), so excluding these players
+    would mostly drop the wrong ones."""
     s = 1.0 if attacking_home else -1.0
     x = s * state.pos[:, 0]
     att = state.is_home == attacking_home

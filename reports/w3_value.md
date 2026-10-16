@@ -46,17 +46,27 @@ Most next touches are short and roughly centred on the ball; a minority are long
 
 ## Putting it together on one frame
 
-Attacking control uses `SKILLCORNER_OPEN_DATA` with attackers in offside positions (in the opponents' half, ahead of the ball and of the second-last defender) left out. Threat Conceded for the frame is the sum over cells of control x V x A. A sums to 1, so TC is the expected xT of where the ball goes next, counted only where the attack would control it.
+Attacking control uses `SKILLCORNER_OPEN_DATA`. Threat Conceded for the frame is the sum over cells of control x V x A. A sums to 1, so TC is the expected xT of where the ball goes next, counted only where the attack would control it.
 
-Frame 60623 (21/22 players detected, 0 attacker(s) offside): TC = 0.0115 xT.
+Frame 60623 (21/22 players detected): TC = 0.0115 xT.
 
 ![decomposition](../figs/w3_tc_decomposition.png)
+
+## Why Threat Conceded has no offside rule
+
+A natural refinement is to drop attackers in offside positions (in the opponents' half, ahead of the ball and of the second-last defender) from attacking control. Checked against the referee, for passes to a receiver in the opponents' half, using positions at the pass frame:
+
+| passes | n | receiver in offside position | any attacker in offside position |
+|---|---|---|---|
+| called offside | 51 | 11.8% | 35.3% |
+| completed | 6,181 | 1.5% | 25.1% |
+
+Broadcast tracking cannot place players precisely enough along the pitch to judge offside, which is decided by centimetres: even when the receiver was detected, the tracking puts them in an offside position in 6% of called offsides (n=36). A hard rule would mostly remove the wrong players, so TC leaves offside out. The cost is that a genuinely offside attacker sometimes counts toward control, slightly overstating space in behind.
 
 ## Caveats
 
 - xT is fitted on 20 matches; zones far from goal rest on many actions, zones in the box on few. The xG-based shot value keeps those zones stable.
 - The transition model ignores who has the ball and the game state; Week 4 can test whether conditioning on phase of play helps.
-- Offside uses the frame's positions as they are, including extrapolated ones, so a mistracked last defender can flip an attacker's status.
 - V is the value of the ball being at x for the team in possession; TC does not yet account for what the attack does after reaching x beyond that.
 
 Outputs: `data/derived/value_fit.json` (xT grid, transition parameters).
