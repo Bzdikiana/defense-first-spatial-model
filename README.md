@@ -89,6 +89,45 @@ team flags, ball and target, in metres) or a `PC.FrameState` directly, and use
 `SKILLCORNER_OPEN_DATA_NO_FLAGS` unless your data marks extrapolated positions.
 To refit on your own passes: `PC.fit_params(batch, passer_home, success)`.
 
+## xG for SkillCorner open-data shots
+
+The open data has shots but no xG. `dsv.xg` provides one, trained on 40,541 StatsBomb
+open-data shots using only features SkillCorner tracking also has: shot geometry, headers,
+blockers in the shooting triangle, keeper position and pressure, taken from the tracking
+frame of the shot. Full write-up: [reports/w3_xg.md](reports/w3_xg.md).
+
+| | log loss | AUC | total xG vs goals |
+|---|---|---|---|
+| StatsBomb, held-out leagues | 0.257 | 0.800 | 3,892 vs 3,884 |
+| SkillCorner A-League shots (524, penalties excluded) | 0.315 | 0.755 | 56.7 vs 60 |
+| same, geometry only (no tracking context) | 0.330 | 0.715 | 55.9 vs 60 |
+
+```python
+from dsv import xg
+shots = xg.skillcorner_shots(events, players, ball, meta)   # one row per shot, with features
+shots["xg"] = xg.xg_for_shots(shots)                         # coefficients ship in dsv.xg.OPEN_DATA_XG
+```
+
+Caveats: it ranks shots less well when opponents near the shooter are extrapolated, and in
+the held-out lower league it undercounts goals by 14% (6% on the A-League shots).
+StatsBomb data is used under its open-data terms, with attribution
+([github.com/statsbomb/open-data](https://github.com/statsbomb/open-data)).
+
+## Danger and where the ball goes next
+
+`dsv.value` ships two surfaces fitted on the 20 matches ([reports/w3_value.md](reports/w3_value.md)):
+
+- `OPEN_DATA_XT`: Markov expected threat (12 x 8 zones) with each zone's shot value from the
+  xG model. It correlates 0.99 with Karun Singh's published grid. For ranking which
+  possessions lead to shots, every danger surface tried (this xT, Singh's grid, xG from the
+  location) lands within 0.006 AUC of plain distance to goal.
+- `OPEN_DATA_TRANSITION`: where the ball goes next given where it is. A two-part mixture
+  (76% short and centred on the ball, 24% long and about 18 m forward) beats the single
+  Gaussian used in Spearman-style models on held-out log-likelihood in all 20 matches.
+
+`offside_players` flags attackers in offside positions so they can be left out of pitch
+control (`pitch_control(..., exclude=...)`).
+
 ## SkillCorner open data: things to know
 
 Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_audit.md)).
@@ -133,6 +172,8 @@ py scripts/00_fetch_data.py         # ~1.8 GB into data/ (tracking files are git
 py scripts/01_data_audit.py         # coverage audit, v95   -> reports/w1_data_audit.md
 py scripts/02_pitch_control.py      # pitch-control sanity  -> reports/w2_pitch_control.md
 py scripts/03_fit_pitch_control.py  # parameter fit, ~40 min -> reports/w2_parameter_fit.md
+py scripts/04_xg.py                 # xG (downloads StatsBomb shots, ~3 min) -> reports/w3_xg.md
+py scripts/05_value.py              # xT and ball transitions -> reports/w3_value.md
 py -m pytest
 ```
 
@@ -142,9 +183,10 @@ py -m pytest
 |---|---|
 | `dsv/data.py` | fetch, parse tracking / events / phases, direction normalization, kinematics, v95, coverage audit, event alignment, passes with destinations |
 | `dsv/pitchcontrol.py` | Spearman pitch control (grid and batched points), per-player vmax, detection-aware uncertainty, renormalized leave-one-out, parameter fitting |
+| `dsv/xg.py` | xG model: shared shot features for StatsBomb and SkillCorner, fitted coefficients |
+| `dsv/value.py` | expected threat, next-ball-location model, offside, fitted surfaces |
 | `dsv/metrics.py` | log loss, Brier, AUC, calibration error, logistic baseline |
 | `dsv/viz.py` | pitch, player and surface plots |
-| `dsv/value.py` | Week 3: danger surface and accessibility weight |
 | `dsv/threat.py` | Week 4: Threat Conceded and aggregation |
 | `dsv/attribution.py` | Week 6: per-defender suppression and beaten attribution |
 | `dsv/counterfactual.py` | Week 7: alternative actions, DDV, pressing cost-benefit |

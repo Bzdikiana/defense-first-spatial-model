@@ -111,3 +111,18 @@ def test_sigma_extrap_softens_only_extrapolated_players():
     # more timing uncertainty pulls confident predictions toward the middle
     sure = np.abs(p_sharp - 0.5) > 0.45
     assert np.mean(np.abs(p_soft[sure] - 0.5)) < np.mean(np.abs(p_sharp[sure] - 0.5))
+
+
+def test_xg_features_and_shipped_model():
+    from dsv import xg
+    # central shot 11 m out, nobody around: angle ~0.64 rad, sizeable xG
+    f = xg.shot_features([-11.0, 0.0], False, np.empty((0, 2)), np.array([-0.5, 0.0]))
+    assert f["dist"] == pytest.approx(11.0)
+    assert f["angle"] == pytest.approx(2 * np.arctan(3.66 / 11), abs=1e-3)
+    assert f["n_block"] == 0
+    # a defender in the shooter-posts triangle counts as a blocker
+    g = xg.shot_features([-11.0, 0.0], False, np.array([[-5.0, 0.0]]), np.array([-0.5, 0.0]))
+    assert g["n_block"] == 1
+    df = pd.DataFrame([f, g, xg.shot_features([-30.0, 15.0], True, np.empty((0, 2)), None)])
+    p = xg.xg_for_shots(df)
+    assert p[0] > p[1] > p[2] > 0          # blocked is worse; a far header is worst

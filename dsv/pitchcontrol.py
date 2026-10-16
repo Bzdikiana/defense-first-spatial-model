@@ -313,8 +313,13 @@ class PCResult:
         return out.reshape(self.grid.shape)
 
 
-def pitch_control(state: FrameState, grid: Grid, params: PCParams = PCParams()) -> PCResult:
+def pitch_control(state: FrameState, grid: Grid, params: PCParams = PCParams(),
+                  exclude: Optional[np.ndarray] = None) -> PCResult:
+    """Control surface for one frame. `exclude` (n,) bool leaves players out,
+    e.g. attackers in offside positions (dsv.value.offside_players)."""
     masks = np.ones((1, len(state.player_id)), dtype=bool)
+    if exclude is not None:
+        masks[0] &= ~np.asarray(exclude, dtype=bool)
     return PCResult(grid, state, _control(state, grid, params, masks)[0])
 
 
