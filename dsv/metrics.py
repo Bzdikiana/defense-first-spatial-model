@@ -28,7 +28,9 @@ def auc(y, p) -> float:
     """Area under the ROC curve (Mann-Whitney, ties averaged)."""
     y = np.asarray(y, bool)
     r = rankdata(np.asarray(p, float))
-    n1, n0 = y.sum(), (~y).sum()
+    # floats: on Windows numpy's default int is 32-bit and n1 * n0 overflows
+    # for a few hundred thousand rows
+    n1, n0 = float(y.sum()), float((~y).sum())
     return float((r[y].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
 
 

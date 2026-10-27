@@ -264,6 +264,51 @@ def _integrate(tau, t_ball, lam, params: PCParams, early_stop: bool = True,
     return pc
 
 
+def _integrate_rows(tau, t_ball, lam, alpha, params: PCParams, lead: float = 3.5,
+                    check_every: int = 4) -> np.ndarray:
+    """Fast version of `_integrate` for many independent rows (cells or
+    points), each with its own players: tau, lam, alpha all (rows, n).
+
+    Two shortcuts that leave the model unchanged up to the early-stop
+    tolerance: each row's clock starts `lead` timing spreads before its
+    first possible arrival (or at the ball's arrival, if later), since
+    before that every player's arrival probability is below ~0.2% and
+    nothing happens; and rows whose uncontrolled share is below `tol` are
+    dropped from the loop. Used for match-long Threat Conceded; the fitted
+    parameters were estimated with `_integrate`.
+    """
+    rows, n = tau.shape
+    pc = np.zeros((rows, n), dtype=np.float32)
+    sig = (np.pi / np.sqrt(3.0)) / alpha                         # per-player sigma
+    first = (tau - lead * sig).min(axis=1)
+    t0 = np.maximum(np.asarray(t_ball, dtype=np.float32), first).astype(np.float32)
+    dt = np.float32(params.dt)
+    act = np.arange(rows)
+    tau_a, lam_a, alpha_a, t0_a = tau, lam, alpha, t0
+    remaining = np.ones((rows, 1), dtype=np.float32)
+    pc_a = pc
+    for step in range(int(round(params.t_max / params.dt))):
+        T = (t0_a + step * dt)[:, None]
+        f = 1.0 / (1.0 + np.exp(np.clip(-alpha_a * (T - tau_a), -50, 50)))
+        w = f * lam_a
+        rate = w.sum(axis=1, keepdims=True)
+        gain = remaining * (1.0 - np.exp(-rate * dt))
+        pc_a += gain * w / np.maximum(rate, 1e-12)
+        remaining -= gain
+        if step % check_every == check_every - 1:
+            done = remaining[:, 0] < params.tol
+            if done.any():
+                pc[act[done]] = pc_a[done]
+                keep = ~done
+                act, tau_a, lam_a, alpha_a = act[keep], tau_a[keep], lam_a[keep], alpha_a[keep]
+                t0_a, remaining, pc_a = t0_a[keep], remaining[keep], pc_a[keep]
+                if not len(act):
+                    break
+    if len(act):
+        pc[act] = pc_a
+    return pc
+
+
 def _control(state: FrameState, grid: Grid, params: PCParams, masks: np.ndarray) -> np.ndarray:
     """Per-player control for k variants of the frame.
 

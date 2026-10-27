@@ -126,6 +126,34 @@ StatsBomb data is used under its open-data terms, with attribution
   Gaussian used in Spearman-style models on held-out log-likelihood in all 20 matches.
 
 
+## Does Threat Conceded predict shots?
+
+Threat Conceded (TC) is the danger a defense allows at a moment: the attack's pitch control,
+weighted by where the ball can go next and how dangerous each spot is (`dsv.threat`). It was
+tested on 2,931 possessions from the 20 matches: does the peak TC, at least 2 s before any
+shot, predict that the possession produces a shot or goal? Logistic regression with the same
+controls for every measure, scored on held-out matches
+([reports/w5_validation.md](reports/w5_validation.md)).
+
+| measure (controls + ...) | held-out log loss | AUC |
+|---|---|---|
+| ball distance to goal (closest point) | 0.283 | 0.885 |
+| TC, xT as the danger map | 0.290 | 0.881 |
+| ball-location danger only (no defense) | 0.291 | 0.878 |
+| TC with nearest-player-wins instead of pitch control | 0.300 | 0.871 |
+| control × xT without reachability (Fernández-style) | 0.298 | 0.863 |
+| raw space conceded (m²) | 0.309 | 0.850 |
+
+- **The pre-declared test failed.** With xT as the danger map, TC beats every other space
+  measure but not ball location: the defense's control adds nothing measurable beyond where
+  the ball is, and plain distance to goal does best.
+- **With shooting danger as the map, the defense shows up.** Using "xG of a typical shot from
+  here" instead of xT, chosen inside each training fold (it won all 20), TC beats ball
+  distance (log loss 0.277) and beats its own ball-location-only version (95% interval of the
+  difference −0.007 to −0.001). This was found after the main test, so treat it as a strong
+  lead rather than a confirmed result.
+- The same holds frame by frame for a shot within the next 5 s.
+
 ## SkillCorner open data: things to know
 
 Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_audit.md)).
@@ -178,6 +206,8 @@ py scripts/02_pitch_control.py      # pitch-control sanity  -> reports/w2_pitch_
 py scripts/03_fit_pitch_control.py  # parameter fit, ~40 min -> reports/w2_parameter_fit.md
 py scripts/04_xg.py                 # xG (downloads StatsBomb shots, ~3 min) -> reports/w3_xg.md
 py scripts/05_value.py              # xT and ball transitions -> reports/w3_value.md
+py scripts/06_threat.py             # Threat Conceded, all matches, ~40 min -> reports/w4_threat.md
+py scripts/07_validation.py         # does it predict shots? -> reports/w5_validation.md
 py -m pytest
 ```
 
@@ -191,7 +221,7 @@ py -m pytest
 | `dsv/value.py` | expected threat, next-ball-location model, fitted surfaces |
 | `dsv/metrics.py` | log loss, Brier, AUC, calibration error, logistic baseline |
 | `dsv/viz.py` | pitch, player and surface plots |
-| `dsv/threat.py` | Week 4: Threat Conceded and aggregation |
+| `dsv/threat.py` | Threat Conceded per frame (with reachable danger and cover), team possessions, possession and team-match summaries |
 | `dsv/attribution.py` | Week 6: per-defender suppression and beaten attribution |
 | `dsv/counterfactual.py` | Week 7: alternative actions, DDV, pressing cost-benefit |
 | `scripts/` | runnable pipeline steps |

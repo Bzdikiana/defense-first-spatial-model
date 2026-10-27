@@ -126,3 +126,11 @@ def test_xg_features_and_shipped_model():
     df = pd.DataFrame([f, g, xg.shot_features([-30.0, 15.0], True, np.empty((0, 2)), None)])
     p = xg.xg_for_shots(df)
     assert p[0] > p[1] > p[2] > 0          # blocked is worse; a far header is worst
+
+
+def test_auc_large_inputs_do_not_overflow():
+    rng = np.random.default_rng(0)
+    y = rng.random(400_000) < 0.05
+    p = y + rng.normal(0, 1, len(y))
+    a = M.auc(y, p)
+    assert 0.5 < a < 1.0
