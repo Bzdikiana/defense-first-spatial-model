@@ -1,0 +1,563 @@
+<title>Defensive Cover Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an analysis desk. The pitch replay dominates, live instruments sit in a column beside it,
+   the possession timeline runs underneath, and the method notes close the page. */
+:root {
+  --bg: #eef2ef;
+  --panel: #fbfcfb;
+  --ink: #17221c;
+  --muted: #5a6b61;
+  --line: #cfd8d2;
+  --turf: #dfe9e2;
+  --turf-line: #ffffff;
+  --att: #d4511c;
+  --def: #1f5f9e;
+  --heat: #e8890c;
+  --good: #2b8a5e;
+  --bad: #c8342c;
+  --focus: #1f5f9e;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1511; --panel: #141e18; --ink: #e3ebe6; --muted: #93a49a; --line: #2a3a31;
+    --turf: #15281d; --turf-line: rgba(226, 238, 230, 0.42); --att: #f0773f; --def: #5b9ee0;
+    --heat: #f5a524; --good: #4fbf8a; --bad: #ef6b60; --focus: #8cc0f0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1511; --panel: #141e18; --ink: #e3ebe6; --muted: #93a49a; --line: #2a3a31;
+  --turf: #15281d; --turf-line: rgba(226, 238, 230, 0.42); --att: #f0773f; --def: #5b9ee0;
+  --heat: #f5a524; --good: #4fbf8a; --bad: #ef6b60; --focus: #8cc0f0; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1320px; margin: 0 auto; display: grid; gap: 18px; }
+header { display: grid; gap: 6px; }
+.eyebrow { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 4.2vw, 46px); line-height: 1; margin: 0; letter-spacing: 0.01em; text-wrap: balance; }
+.lede { margin: 0; max-width: 72ch; color: var(--muted); }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 24px; margin: 0; letter-spacing: 0.02em; }
+h3 { font-family: var(--font-display); font-weight: 600; font-size: 19px; margin: 0; letter-spacing: 0.02em; }
+
+.picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 999px; padding: 6px 14px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center;
+}
+.chip[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.chip .tag { font-family: var(--font-data); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.chip .tag.goal { color: var(--bad); }
+button:focus-visible, input:focus-visible, .chip:focus-visible, .seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.desk { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+@media (max-width: 960px) { .desk { grid-template-columns: minmax(0, 1fr); } }
+.stage { display: grid; gap: 10px; min-width: 0; }
+.context { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+.context .teams { font-family: var(--font-display); font-weight: 600; font-size: 20px; }
+.context .meta { font-size: 13px; color: var(--muted); }
+.blurb { margin: 0; font-size: 14px; color: var(--muted); max-width: 80ch; }
+.pitchbox { position: relative; width: 100%; aspect-ratio: 105 / 72; max-width: 100%; }
+canvas { display: block; width: 100%; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.dot.att { background: var(--att); } .dot.def { background: var(--def); }
+.dot.hollow { border: 2px solid var(--muted); background: transparent; }
+.ramp { width: 46px; height: 9px; border-radius: 2px; display: inline-block; background: linear-gradient(90deg, transparent, var(--heat), var(--bad)); border: 1px solid var(--line); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.seg button { font: inherit; font-size: 13px; padding: 6px 11px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seglabel { font-family: var(--font-data); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.ctl { display: inline-flex; gap: 6px; align-items: center; }
+.play {
+  font: inherit; font-weight: 600; font-size: 14px; min-width: 84px; padding: 7px 14px; border-radius: 8px;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--bg); cursor: pointer;
+}
+.iconbtn { font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.clock { font-family: var(--font-data); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.timeline { display: grid; gap: 4px; }
+.tlbox { position: relative; width: 100%; height: 118px; }
+.tlkey { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.tlkey i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
+.eventnow { min-height: 1.5em; font-size: 14px; }
+.eventnow b { font-family: var(--font-data); font-weight: 500; font-size: 12px; color: var(--muted); margin-right: 8px; }
+
+aside { display: grid; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.gauge { display: grid; gap: 2px; }
+.gauge .label { font-size: 13px; color: var(--muted); }
+.gauge .big { font-family: var(--font-display); font-weight: 700; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+.gauge .sub { font-size: 12px; color: var(--muted); }
+.meter { position: relative; height: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; overflow: visible; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--def); border-radius: 5px 0 0 5px; }
+.meter .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+.rows { display: grid; gap: 4px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 13px; }
+.row .v { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.divider { border-top: 1px solid var(--line); }
+.holders { display: grid; gap: 5px; }
+.holder { display: grid; grid-template-columns: minmax(0, 1fr) 72px 44px; gap: 8px; align-items: center; font-size: 12.5px; }
+.holder .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.holder .bar { height: 8px; background: var(--bg); border-radius: 4px; position: relative; overflow: hidden; border: 1px solid var(--line); }
+.holder .bar i { position: absolute; inset: 0 auto 0 0; background: var(--def); }
+.holder .v { font-family: var(--font-data); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.holder.press .n { font-weight: 600; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+
+.method { display: grid; gap: 14px; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+.card { border-top: 2px solid var(--ink); padding-top: 10px; display: grid; gap: 6px; align-content: start; }
+.card p { margin: 0; font-size: 14px; max-width: 65ch; }
+.card .live { font-family: var(--font-data); font-size: 12.5px; color: var(--muted); }
+.foot { font-size: 12px; color: var(--muted); max-width: 90ch; }
+.foot code { font-family: var(--font-data); font-size: 11.5px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">SkillCorner open data · A-League 2024/25 · 5 frames a second</div>
+    <h1>Defensive Cover Explorer</h1>
+    <p class="lede">Replay a possession and watch where the defense leaves danger open. Each moment shows how dangerous the ball's situation is, what share of that danger the defense covers compared with a typical A-League defense, and the chance of a shot in the next five seconds.</p>
+  </header>
+
+  <nav class="picker" id="picker" aria-label="Possessions"></nav>
+
+  <div class="desk">
+    <section class="stage" aria-label="Replay">
+      <div class="context">
+        <span class="teams" id="teams"></span>
+        <span class="meta" id="pmeta"></span>
+      </div>
+      <p class="blurb" id="blurb"></p>
+      <div class="pitchbox" id="pitchbox"><canvas id="pitch" role="img" aria-label="Pitch replay"></canvas></div>
+      <div class="legend" id="legend">
+        <span><i class="dot att"></i><span id="lg-att">Attack</span></span>
+        <span><i class="dot def"></i><span id="lg-def">Defense</span></span>
+        <span><i class="dot hollow"></i>Position extrapolated (off camera)</span>
+        <span id="lg-layer"><i class="ramp"></i>Danger left open</span>
+      </div>
+      <div class="controls">
+        <div class="ctl">
+          <button class="play" id="play" type="button">Play</button>
+          <button class="iconbtn" id="back" type="button" aria-label="Step back">◀</button>
+          <button class="iconbtn" id="fwd" type="button" aria-label="Step forward">▶</button>
+          <span class="clock" id="clock">0.0 s</span>
+        </div>
+        <div class="ctl"><span class="seglabel">Speed</span>
+          <div class="seg" id="speed" role="group" aria-label="Speed">
+            <button type="button" data-v="0.5">½×</button><button type="button" data-v="1" aria-pressed="true">1×</button><button type="button" data-v="2">2×</button>
+          </div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="ctl"><span class="seglabel">Layer</span>
+          <div class="seg" id="layer" role="group" aria-label="Layer">
+            <button type="button" data-v="field" aria-pressed="true">Open danger: field</button>
+            <button type="button" data-v="zones">Open danger: 18 zones</button>
+            <button type="button" data-v="pc">Who controls space</button>
+            <button type="button" data-v="none">Off</button>
+          </div>
+        </div>
+        <div class="ctl"><span class="seglabel">Danger map</span>
+          <div class="seg" id="map" role="group" aria-label="Danger map">
+            <button type="button" data-v="xg" aria-pressed="true">Shooting (xG)</button>
+            <button type="button" data-v="xt">Possession value (xT)</button>
+          </div>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="tlbox" id="tlbox"><canvas id="tl" role="img" aria-label="Timeline of the chance of a shot and the defense's cover"></canvas></div>
+        <div class="tlkey">
+          <span><i style="background: var(--heat)"></i>Chance of a shot in 5 s</span>
+          <span><i style="background: var(--def)"></i>Cover</span>
+          <span><i style="background: var(--muted)"></i>Typical cover here</span>
+          <span>▲ press · ◆ shot · | ball received</span>
+        </div>
+        <div class="eventnow" id="eventnow"></div>
+      </div>
+    </section>
+
+    <aside aria-label="Live readouts">
+      <div class="gauge">
+        <span class="label">Chance of a shot in the next 5 s</span>
+        <span class="big" id="pshot">–</span>
+        <span class="sub" id="pshot-sub">Two-part model: where the ball is, plus the defense's cover</span>
+      </div>
+      <div class="gauge">
+        <span class="label">Defense's cover of the reachable danger</span>
+        <div class="meter" aria-hidden="true"><div class="fill" id="cover-fill"></div><div class="mark" id="cover-mark"></div></div>
+        <div class="rows">
+          <div class="row"><span>Cover</span><span class="v" id="cover"></span></div>
+          <div class="row"><span>Typical A-League defense here</span><span class="v" id="tcover"></span></div>
+        </div>
+      </div>
+      <div class="rows">
+        <div class="row"><span>Reachable danger (ball situation)</span><span class="v" id="rd"></span></div>
+        <div class="row"><span>Danger left open</span><span class="v" id="tc"></span></div>
+      </div>
+      <div class="divider"></div>
+      <div class="gauge">
+        <span class="label">Who holds the cover (share of the reachable shooting danger each defender controls)</span>
+      </div>
+      <div class="holders" id="holders"></div>
+      <p class="note" id="holders-note"></p>
+    </aside>
+  </div>
+
+  <section class="method" aria-label="Continuous or discrete">
+    <h2>Continuous or discrete?</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>In time: continuous</h3>
+        <p>Every number here is recomputed five times a second for the whole possession, not once per pass or per zone entry. For a possession-level summary the model takes the moment of greatest danger: the defense's cover at that moment predicts shots, while cover averaged over the possession does not.</p>
+      </div>
+      <div class="card">
+        <h3>In space: a continuous field, counted in zones</h3>
+        <p>Pitch control and the danger maps are smooth functions of position, evaluated on 2 m cells. The zones view adds the same cells into the 18 classic zones, so the danger left open is identical either way; zones only change how it is read.</p>
+        <span class="live" id="zonecheck"></span>
+      </div>
+      <div class="card">
+        <h3>The danger maps</h3>
+        <p>Shooting danger (xG from here) is a smooth function of distance and angle to goal. Possession value (xT) is estimated on 12 × 8 zones of the pitch and smoothed between their centres, so it spreads danger across midfield. Switch maps to compare: the defense's cover predicts shots with either once it is measured separately from where the ball is.</p>
+      </div>
+    </div>
+    <p class="foot">Data: SkillCorner open data (A-League 2024/25), broadcast tracking. Pitch control fitted to the open data; danger in xG; chance of a shot from the two-part model in <code>dsv.defense</code>. Attack always plays left to right here. Code: <code>scripts/13_explorer.py</code>, package <code>dsv</code>.</p>
+  </section>
+</div>
+
+<script id="explorer-data" type="application/json">/*__DATA__*/null</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById("explorer-data").textContent);
+  const $ = (id) => document.getElementById(id);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const state = { p: 0, i: 0, frac: 0, playing: false, speed: 1, layer: "field", map: "xg", last: 0 };
+  let fieldCache = {};
+
+  if (!DATA || !DATA.possessions || !DATA.possessions.length) {
+    $("blurb").textContent = "No possessions were exported. Run scripts/13_explorer.py to build this page.";
+    return;
+  }
+
+  const P = () => DATA.possessions[state.p];
+  const n = () => P().frames.t.length;
+
+  function decode(b64) {
+    const s = atob(b64); const a = new Uint8Array(s.length);
+    for (let k = 0; k < s.length; k++) a[k] = s.charCodeAt(k);
+    return a;
+  }
+  function field(layer, i) {
+    const key = state.p + ":" + layer + ":" + i;
+    if (!fieldCache[key]) fieldCache[key] = decode(P().fields[layer][i]);
+    return fieldCache[key];
+  }
+
+  // ---------- picker ----------
+  DATA.possessions.forEach((p, k) => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.id = "pick-" + p.key;
+    const tag = p.goal ? "goal" : p.shot ? "shot" : "no shot";
+    b.innerHTML = `<span></span><span class="tag ${p.goal ? "goal" : ""}"></span>`;
+    b.firstChild.textContent = p.title; b.lastChild.textContent = tag;
+    b.addEventListener("click", () => selectPossession(k));
+    $("picker").appendChild(b);
+  });
+
+  function selectPossession(k) {
+    state.p = k; state.i = 0; state.frac = 0; fieldCache = {};
+    [...$("picker").children].forEach((c, j) => c.setAttribute("aria-pressed", String(j === k)));
+    const p = P();
+    $("teams").textContent = `${p.attack} attacking · ${p.defend} defending`;
+    $("pmeta").textContent = `${p.home} v ${p.away} · half ${p.period}` + (p.phases ? ` · ${p.phases}` : "");
+    $("blurb").textContent = p.blurb;
+    $("lg-att").textContent = p.attack; $("lg-def").textContent = p.defend;
+    draw();
+  }
+
+  // ---------- segmented controls ----------
+  function seg(id, key, cb) {
+    $(id).addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      [...$(id).children].forEach((c) => c.setAttribute("aria-pressed", String(c === b)));
+      state[key] = key === "speed" ? parseFloat(b.dataset.v) : b.dataset.v;
+      if (cb) cb(); draw();
+    });
+  }
+  seg("speed", "speed"); seg("layer", "layer", legendLayer); seg("map", "map");
+  function legendLayer() {
+    $("lg-layer").innerHTML = state.layer === "pc"
+      ? `<i class="ramp" style="background: linear-gradient(90deg, var(--def), transparent, var(--att))"></i>Space each team would reach first`
+      : state.layer === "none" ? "" : `<i class="ramp"></i>Danger left open`;
+  }
+
+  // ---------- pitch ----------
+  const pc = $("pitch"), ctx = pc.getContext("2d");
+  const off = document.createElement("canvas"), octx = off.getContext("2d");
+  function sizeCanvas(cv) {
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) {
+      cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d);
+    }
+    return { w: r.width, h: r.height, d };
+  }
+  function rgb(hex) {
+    const m = hex.replace("#", ""); if (m.length !== 6) return [200, 120, 20];
+    return [parseInt(m.slice(0, 2), 16), parseInt(m.slice(2, 4), 16), parseInt(m.slice(4, 6), 16)];
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function playersAt(i, t) {
+    const F = P().frames, j = Math.min(i + 1, n() - 1);
+    const mix = (A, B, keyIdx) => {
+      const m = new Map(B.map((q) => [q[keyIdx], q]));
+      return A.map((q) => { const r = m.get(q[keyIdx]); return r ? [lerp(q[0], r[0], t), lerp(q[1], r[1], t), ...q.slice(2)] : q; });
+    };
+    return {
+      att: mix(F.att[i], F.att[j], 2), dfn: mix(F.dfn[i], F.dfn[j], 4),
+      ball: [lerp(F.ball[i][0], F.ball[j][0], t), lerp(F.ball[i][1], F.ball[j][1], t)],
+    };
+  }
+
+  function drawPitch() {
+    const { w, h, d } = sizeCanvas(pc); const p = P();
+    ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, w, h);
+    const pad = 10, sc = Math.min((w - 2 * pad) / p.L, (h - 2 * pad) / p.W);
+    const ox = (w - sc * p.L) / 2, oy = (h - sc * p.W) / 2;
+    const X = (x) => ox + (x + p.L / 2) * sc, Y = (y) => oy + (p.W / 2 - y) * sc;
+    ctx.fillStyle = css("--turf"); ctx.fillRect(ox - 6, oy - 6, sc * p.L + 12, sc * p.W + 12);
+
+    // layer
+    const i = state.i;
+    if (state.layer === "field" || state.layer === "pc") {
+      const key = state.layer === "pc" ? "pc" : state.map === "xg" ? "open_xg" : "open_xt";
+      const a = field(key, i); off.width = p.nx; off.height = p.ny;
+      const img = octx.createImageData(p.nx, p.ny);
+      const hot = rgb(css("--heat")), bad = rgb(css("--bad")), att = rgb(css("--att")), def = rgb(css("--def"));
+      for (let r = 0; r < p.ny; r++) for (let c = 0; c < p.nx; c++) {
+        const v = a[r * p.nx + c] / 255, o = ((p.ny - 1 - r) * p.nx + c) * 4;
+        if (key === "pc") {
+          const col = v >= 0.5 ? att : def, s = Math.min(1, Math.abs(v - 0.5) * 2);
+          img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = Math.round(150 * s);
+        } else {
+          const t = Math.min(1, v * 1.15), col = hot.map((h0, k) => Math.round(lerp(h0, bad[k], t)));
+          img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = Math.round(235 * Math.pow(v, 0.55));
+        }
+      }
+      octx.putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(off, X(-p.L / 2), Y(p.W / 2), sc * p.L, sc * p.W);
+    } else if (state.layer === "zones") {
+      const z = P().frames[state.map === "xg" ? "zones_xg" : "zones_xt"][i];
+      const tot = z.reduce((s, v) => s + v, 0) || 1, mx = Math.max(...z) || 1;
+      const hot = rgb(css("--heat")), bad = rgb(css("--bad"));
+      ctx.font = `600 ${Math.max(11, sc * 2.6)}px ${css("--font-data")}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      for (let k = 0; k < 18; k++) {
+        const zx = k % 6, zy = Math.floor(k / 6), v = z[k] / mx;
+        const x0 = -p.L / 2 + zx * p.L / 6, y0 = -p.W / 2 + zy * p.W / 3;
+        const col = hot.map((h0, q) => Math.round(lerp(h0, bad[q], v)));
+        ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${(0.85 * Math.pow(v, 0.55)).toFixed(3)})`;
+        ctx.fillRect(X(x0), Y(y0 + p.W / 3), sc * p.L / 6, sc * p.W / 3);
+        const share = z[k] / tot;
+        if (share >= 0.01) {
+          ctx.fillStyle = css("--ink"); ctx.globalAlpha = 0.85;
+          ctx.fillText(`${Math.round(share * 100)}%`, X(x0 + p.L / 12), Y(y0 + p.W / 6)); ctx.globalAlpha = 1;
+        }
+      }
+      ctx.strokeStyle = css("--muted"); ctx.globalAlpha = 0.5; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      for (let k = 1; k < 6; k++) { ctx.beginPath(); ctx.moveTo(X(-p.L / 2 + k * p.L / 6), Y(p.W / 2)); ctx.lineTo(X(-p.L / 2 + k * p.L / 6), Y(-p.W / 2)); ctx.stroke(); }
+      for (let k = 1; k < 3; k++) { ctx.beginPath(); ctx.moveTo(X(-p.L / 2), Y(-p.W / 2 + k * p.W / 3)); ctx.lineTo(X(p.L / 2), Y(-p.W / 2 + k * p.W / 3)); ctx.stroke(); }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+
+    // markings
+    ctx.strokeStyle = css("--turf-line"); ctx.lineWidth = 1.4;
+    const L = p.L, W = p.W;
+    ctx.strokeRect(X(-L / 2), Y(W / 2), sc * L, sc * W);
+    ctx.beginPath(); ctx.moveTo(X(0), Y(W / 2)); ctx.lineTo(X(0), Y(-W / 2)); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(0), Y(0), 9.15 * sc, 0, 2 * Math.PI); ctx.stroke();
+    for (const s of [-1, 1]) {
+      const gx = s * L / 2;
+      ctx.strokeRect(Math.min(X(gx), X(gx - s * 16.5)), Y(20.16), 16.5 * sc, 40.32 * sc);
+      ctx.strokeRect(Math.min(X(gx), X(gx - s * 5.5)), Y(9.16), 5.5 * sc, 18.32 * sc);
+      ctx.beginPath(); ctx.moveTo(X(gx), Y(3.66)); ctx.lineTo(X(gx + s * 1.6), Y(3.66)); ctx.lineTo(X(gx + s * 1.6), Y(-3.66)); ctx.lineTo(X(gx), Y(-3.66)); ctx.stroke();
+    }
+
+    // players
+    const pl = playersAt(state.i, state.frac);
+    const shares = P().frames.shares[state.i];
+    const press = activePress();
+    const rr = Math.max(7, sc * 1.05);
+    ctx.font = `600 ${Math.max(9, rr * 0.95)}px ${css("--font-data")}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const dot = (q, col, isDef) => {
+      const x = X(q[0]), y = Y(q[1]), det = q[3] === 1;
+      if (isDef) {
+        const sh = shares[String(q[4])] || 0;
+        if (sh > 0.04) { ctx.beginPath(); ctx.arc(x, y, rr + 2 + sh * 40, 0, 2 * Math.PI); ctx.fillStyle = col; ctx.globalAlpha = 0.16; ctx.fill(); ctx.globalAlpha = 1; }
+        if (press && press.pid === q[4]) { ctx.beginPath(); ctx.arc(x, y, rr + 5, 0, 2 * Math.PI); ctx.setLineDash([3, 3]); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.6; ctx.stroke(); ctx.setLineDash([]); }
+      }
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, 2 * Math.PI);
+      if (det) { ctx.fillStyle = col; ctx.fill(); } else { ctx.fillStyle = css("--turf"); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); }
+      if (q[2] != null) { ctx.fillStyle = det ? "#ffffff" : col; ctx.fillText(String(q[2]), x, y + 0.5); }
+    };
+    pl.dfn.forEach((q) => dot(q, css("--def"), true));
+    pl.att.forEach((q) => dot(q, css("--att"), false));
+    ctx.beginPath(); ctx.arc(X(pl.ball[0]), Y(pl.ball[1]), Math.max(4, rr * 0.5), 0, 2 * Math.PI);
+    ctx.fillStyle = "#ffffff"; ctx.fill(); ctx.lineWidth = 1.6; ctx.strokeStyle = "#111111"; ctx.stroke();
+    ctx.fillStyle = css("--muted"); ctx.font = `500 11px ${css("--font-data")}`; ctx.textAlign = "right"; ctx.textBaseline = "top";
+    ctx.fillText("attack →", X(L / 2) - 4, Y(W / 2) + 4);
+  }
+
+  function activePress() {
+    const t = P().frames.t[state.i];
+    const e = P().events.filter((q) => q.kind === "press" && q.t <= t && t <= q.t_end + 0.6).pop();
+    if (!e) return null;
+    const m = e.label.match(/^#(\d+)/); if (!m) return null;
+    const d = P().frames.dfn[state.i].find((q) => String(q[2]) === m[1]);
+    return d ? { pid: d[4], e } : null;
+  }
+
+  // ---------- timeline ----------
+  const tc = $("tl"), tctx = tc.getContext("2d");
+  function tlGeom() {
+    const { w, h, d } = sizeCanvas(tc); const pad = { l: 34, r: 8, t: 14, b: 16 };
+    const T = P().frames.t, tmax = T[T.length - 1] || 1;
+    return { w, h, d, pad, X: (t) => pad.l + (t / tmax) * (w - pad.l - pad.r), tmax };
+  }
+  function drawTimeline() {
+    const g = tlGeom(), F = P().frames, ctx2 = tctx; const { w, h, d, pad, X } = g;
+    ctx2.setTransform(d, 0, 0, d, 0, 0); ctx2.clearRect(0, 0, w, h);
+    const y0 = h - pad.b, y1 = pad.t, Yv = (v) => y0 - v * (y0 - y1);
+    const pmax = Math.max(0.1, Math.min(1, Math.max(...F.p_shot) * 1.15));
+    ctx2.strokeStyle = css("--line"); ctx2.lineWidth = 1;
+    [0, 0.5, 1].forEach((v) => { ctx2.beginPath(); ctx2.moveTo(pad.l, Yv(v)); ctx2.lineTo(w - pad.r, Yv(v)); ctx2.stroke(); });
+    ctx2.fillStyle = css("--muted"); ctx2.font = `500 10px ${css("--font-data")}`; ctx2.textAlign = "right"; ctx2.textBaseline = "middle";
+    ctx2.fillText(`${Math.round(pmax * 100)}%`, pad.l - 4, Yv(1)); ctx2.fillText("0", pad.l - 4, Yv(0));
+    // chance of a shot (area, own scale)
+    const heat = css("--heat");
+    ctx2.beginPath(); ctx2.moveTo(X(F.t[0]), Yv(0));
+    F.t.forEach((t, k) => ctx2.lineTo(X(t), Yv(F.p_shot[k] / pmax)));
+    ctx2.lineTo(X(F.t[F.t.length - 1]), Yv(0)); ctx2.closePath();
+    ctx2.fillStyle = heat; ctx2.globalAlpha = 0.28; ctx2.fill(); ctx2.globalAlpha = 1;
+    ctx2.beginPath(); F.t.forEach((t, k) => (k ? ctx2.lineTo : ctx2.moveTo).call(ctx2, X(t), Yv(F.p_shot[k] / pmax)));
+    ctx2.strokeStyle = heat; ctx2.lineWidth = 2; ctx2.stroke();
+    // cover (0..1) and typical cover
+    const cov = state.map === "xg" ? F.cover_xg : F.cover_xt;
+    ctx2.beginPath(); F.t.forEach((t, k) => (k ? ctx2.lineTo : ctx2.moveTo).call(ctx2, X(t), Yv(cov[k])));
+    ctx2.strokeStyle = css("--def"); ctx2.lineWidth = 1.8; ctx2.stroke();
+    if (state.map === "xg") {
+      ctx2.beginPath(); F.t.forEach((t, k) => (k ? ctx2.lineTo : ctx2.moveTo).call(ctx2, X(t), Yv(F.typical_cover[k])));
+      ctx2.strokeStyle = css("--muted"); ctx2.setLineDash([4, 3]); ctx2.lineWidth = 1.2; ctx2.stroke(); ctx2.setLineDash([]);
+    }
+    // events
+    P().events.forEach((e) => {
+      const x = X(e.t);
+      if (e.kind === "press") {
+        ctx2.fillStyle = e.outcome === "beaten" ? css("--bad") : e.outcome ? css("--good") : css("--muted");
+        ctx2.beginPath(); ctx2.moveTo(x, 2); ctx2.lineTo(x - 5, 11); ctx2.lineTo(x + 5, 11); ctx2.closePath(); ctx2.fill();
+      } else if (e.kind === "shot") {
+        ctx2.fillStyle = css("--bad"); ctx2.beginPath(); ctx2.moveTo(x, 1); ctx2.lineTo(x + 6, 7); ctx2.lineTo(x, 13); ctx2.lineTo(x - 6, 7); ctx2.closePath(); ctx2.fill();
+      } else {
+        ctx2.strokeStyle = css("--muted"); ctx2.lineWidth = 1; ctx2.beginPath(); ctx2.moveTo(x, y0); ctx2.lineTo(x, y0 + 6); ctx2.stroke();
+      }
+    });
+    // cursor
+    const tnow = lerp(F.t[state.i], F.t[Math.min(state.i + 1, n() - 1)], state.frac);
+    ctx2.strokeStyle = css("--ink"); ctx2.lineWidth = 1.5; ctx2.beginPath(); ctx2.moveTo(X(tnow), y1 - 4); ctx2.lineTo(X(tnow), y0); ctx2.stroke();
+  }
+  function seekFromEvent(ev) {
+    const g = tlGeom(), r = tc.getBoundingClientRect();
+    const t = Math.max(0, Math.min(g.tmax, ((ev.clientX - r.left) - g.pad.l) / (g.w - g.pad.l - g.pad.r) * g.tmax));
+    const T = P().frames.t; let k = 0; while (k < T.length - 1 && T[k + 1] <= t) k++;
+    state.i = k; state.frac = 0; draw();
+  }
+  let dragging = false;
+  tc.addEventListener("pointerdown", (e) => { dragging = true; tc.setPointerCapture(e.pointerId); seekFromEvent(e); });
+  tc.addEventListener("pointermove", (e) => { if (dragging) seekFromEvent(e); });
+  tc.addEventListener("pointerup", () => { dragging = false; });
+
+  // ---------- readouts ----------
+  const pct = (v) => `${(100 * v).toFixed(v < 0.1 ? 1 : 0)}%`;
+  function readouts() {
+    const F = P().frames, i = state.i, xg = state.map === "xg";
+    $("pshot").textContent = pct(F.p_shot[i]);
+    const cov = xg ? F.cover_xg[i] : F.cover_xt[i];
+    $("cover").textContent = pct(cov);
+    $("tcover").textContent = xg ? pct(F.typical_cover[i]) : "shown for the xG map";
+    $("cover-fill").style.width = `${(100 * cov).toFixed(1)}%`;
+    $("cover-mark").style.left = `${(100 * F.typical_cover[i]).toFixed(1)}%`;
+    $("cover-mark").hidden = !xg;
+    const rd = xg ? F.rd_xg[i] : F.rd_xt[i], tc0 = xg ? F.tc_xg[i] : F.tc_xt[i];
+    $("rd").textContent = `${rd.toFixed(3)} ${xg ? "xG" : "xT"}`;
+    $("tc").textContent = `${tc0.toFixed(4)} ${xg ? "xG" : "xT"}`;
+    const t = F.t[i];
+    $("clock").textContent = `${t.toFixed(1)} s / ${F.t[n() - 1].toFixed(1)} s`;
+    const ev = P().events.filter((e) => e.t <= t + 0.05).pop();
+    $("eventnow").innerHTML = ev ? `<b>${ev.t.toFixed(1)} s</b><span></span>` : "";
+    if (ev) $("eventnow").lastChild.textContent = ev.label;
+    // holders
+    const sh = F.shares[i], names = P().names, press = activePress();
+    const list = Object.entries(sh).sort((a, b) => b[1] - a[1]);
+    const mx = Math.max(0.01, list[0] ? list[0][1] : 0.01);
+    const box = $("holders"); box.innerHTML = "";
+    list.forEach(([pid, v]) => {
+      const r = document.createElement("div"); r.className = "holder" + (press && String(press.pid) === pid ? " press" : "");
+      r.innerHTML = `<span class="n"></span><span class="bar"><i></i></span><span class="v"></span>`;
+      r.children[0].textContent = (names[pid] || pid) + (press && String(press.pid) === pid ? " (pressing)" : "");
+      r.children[1].firstChild.style.width = `${(100 * v / mx).toFixed(1)}%`;
+      r.children[2].textContent = pct(v);
+      box.appendChild(r);
+    });
+    $("holders-note").textContent = `Shares add up to the cover (${pct(F.cover_xg[i])} of the reachable shooting danger). Rings on the pitch grow with each defender's share.`;
+    const z = F[xg ? "zones_xg" : "zones_xt"][i], zt = z.reduce((s, v) => s + v, 0);
+    $("zonecheck").textContent = `This moment: field total ${tc0.toFixed(5)}, sum of the 18 zones ${zt.toFixed(5)} (${xg ? "xG" : "xT"}).`;
+  }
+
+  function draw() { drawPitch(); drawTimeline(); readouts(); }
+
+  // ---------- playback ----------
+  function setPlaying(v) { state.playing = v; $("play").textContent = v ? "Pause" : "Play"; if (v) { state.last = performance.now(); requestAnimationFrame(tick); } }
+  function tick(now) {
+    if (!state.playing) return;
+    const dt = (now - state.last) / 1000; state.last = now;
+    const fps = P().fps * state.speed;
+    state.frac += dt * fps;
+    while (state.frac >= 1) { state.frac -= 1; state.i += 1; }
+    if (state.i >= n() - 1) { state.i = n() - 1; state.frac = 0; setPlaying(false); }
+    draw();
+    if (state.playing) requestAnimationFrame(tick);
+  }
+  $("play").addEventListener("click", () => { if (state.i >= n() - 1) { state.i = 0; state.frac = 0; } setPlaying(!state.playing); });
+  $("back").addEventListener("click", () => { setPlaying(false); state.frac = 0; state.i = Math.max(0, state.i - 1); draw(); });
+  $("fwd").addEventListener("click", () => { setPlaying(false); state.frac = 0; state.i = Math.min(n() - 1, state.i + 1); draw(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest && e.target.closest("button, input")) return;
+    if (e.key === " ") { e.preventDefault(); $("play").click(); }
+    if (e.key === "ArrowRight") $("fwd").click();
+    if (e.key === "ArrowLeft") $("back").click();
+  });
+  window.addEventListener("resize", draw);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  selectPossession(0);
+  // open on the most telling moment: the frame with the highest chance of a shot before the end
+  const F0 = P().frames; let best = 0; F0.p_shot.forEach((v, k) => { if (v > F0.p_shot[best]) best = k; });
+  state.i = Math.max(0, best - 3); draw();
+})();
+</script>
