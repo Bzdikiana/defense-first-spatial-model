@@ -1,7 +1,6 @@
 """
 Week 6: the two-part model on the 20 SkillCorner matches (exploratory: these
-analyses came after the Week 5 test failed; the confirmation on independent
-data is scripts/10_confirmation.py).
+analyses came after the Week 5 test failed).
 
 1. Why the product failed: log TC = log RD + log(1 - cover) forces the ball's
    situation and the defense's share to carry the same coefficient. Fitted
