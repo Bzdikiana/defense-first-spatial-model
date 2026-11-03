@@ -1,57 +1,39 @@
-# xG for SkillCorner open-data shots
+# xG for the SkillCorner open-data shots
 
-The SkillCorner open data has shots but no xG. This model is trained on **StatsBomb open data** (40,541 non-penalty shots with freeze frames from five seasons: Premier League 15/16, La Liga 15/16, Serie A 15/16, Ligue 1 15/16, Indian Super League 21/22) using only features that SkillCorner tracking also provides, then applied to the 526 SkillCorner shots. Code: `dsv/xg.py`; script: `scripts/04_xg.py`. StatsBomb data is used under its open-data terms, with attribution.
+The SkillCorner open data has shots but no xG, and the Analytics Cup allows only the SkillCorner data provided for the event, so the model is fitted on the competition's own shots: 524 non-penalty shots and 60 goals in 20 A-League matches, with features from the tracking at the shot frame. Code: `dsv/xg.py`; script: `scripts/04_xg.py`.
 
 ## Features
 
-Shot distance and log-distance to the goal centre, visible goal angle (and its square), header (and distance x header), outfield opponents inside the shooter-posts triangle, the keeper's distance from the shot line and from the goal centre, distance to the nearest opponent, and opponents within 3 m. Logistic regression with a small ridge penalty.
+Shot distance and log-distance to the goal centre, visible goal angle (and its square), header (and distance x header), outfield opponents inside the shooter-posts triangle, the keeper's distance from the shot line and from the goal centre, distance to the nearest opponent, and opponents within 3 m. The geometry-only model keeps the first four. Logistic regression with a ridge penalty.
 
-## Validation on StatsBomb (leave one league out)
+## Which model (held out by match)
 
-| model | log loss | Brier | AUC | ECE | xG / goals |
-|---|---|---|---|---|---|
-| geometry only | 0.2706 | 0.0764 | 0.770 | 0.007 | 3893 / 3884 |
-| full model | 0.2568 | 0.0727 | 0.799 | 0.002 | 3892 / 3884 |
-| StatsBomb xG (reference) | 0.2515 | 0.0707 | 0.811 | 0.005 | 3706 / 3884 |
+| model | ridge | log loss | Brier | AUC | ECE | total xG |
+|---|---|---|---|---|---|---|
+| geometry only | 0.0001 | 0.3396 | 0.0988 | 0.681 | 0.030 | 59.5 |
+| geometry only | 0.01 | 0.3342 | 0.0972 | 0.692 | 0.007 | 59.9 |
+| geometry only | 0.1 | 0.3368 | 0.0975 | 0.692 | 0.028 | 60.0 |
+| full model | 0.0001 | 0.3354 | 0.0977 | 0.706 | 0.046 | 59.6 |
+| full model | 0.01 | 0.3276 | 0.0959 | 0.723 | 0.029 | 60.0 |
+| full model | 0.1 | 0.3319 | 0.0963 | 0.718 | 0.035 | 60.0 |
+| constant (goal rate of the other matches) |  | 0.3586 | 0.1020 | 0.308 | 0.000 | 60.0 |
 
-Per held-out league (full model):
+Kept: **full model**, ridge 0.01 (lowest held-out log loss). Held-out xG totals 60.0 for 60 goals; if the xG values were exactly right, 95% of samples like this would produce 47–74 goals. With 60 goals, differences in the second decimal of AUC are noise.
 
-| league | shots | log loss | AUC | xG / goals |
-|---|---|---|---|---|
-| Premier League 15/16 | 9,817 | 0.2597 | 0.784 | 954 / 914 |
-| La Liga 15/16 | 9,071 | 0.2654 | 0.816 | 936 / 945 |
-| Serie A 15/16 | 9,877 | 0.2341 | 0.816 | 877 / 858 |
-| Ligue 1 15/16 | 8,723 | 0.2582 | 0.800 | 849 / 852 |
-| Indian Super League 21/22 | 3,053 | 0.2913 | 0.750 | 276 / 315 |
-
-StatsBomb's own xG uses more information (shot technique, assist type, body position) and is shown as a reference, not as a baseline to beat.
-
-## Applied to the SkillCorner shots
-
-524 non-penalty shots, 60 goals (2 likely penalties are set to 0.76 xG and left out of these numbers). Total xG **56.7**; if the xG values were exactly right, 95% of seasons would produce 44–70 goals.
-
-| model | log loss | Brier | AUC | ECE | total xG |
-|---|---|---|---|---|---|
-| full model | 0.3148 | 0.0920 | 0.755 | 0.035 | 56.7 |
-| geometry only | 0.3298 | 0.0954 | 0.715 | 0.033 | 55.9 |
-| constant (in-sample goal rate) | 0.3558 | 0.1014 | 0.500 | 0.000 | 60.0 |
-
-The constant model uses the A-League goal rate itself, so it is an in-sample reference. With 60 goals these numbers are noisy: treat differences in the second decimal of AUC as noise.
-
-**Extrapolated positions.** Shots split by whether any opponent within 20 m of the shooter was extrapolated at the shot frame:
+**Extrapolated positions.** Shots split by whether any opponent within 20 m of the shooter was extrapolated at the shot frame (held-out xG):
 
 | shots | n | goals | xG | log loss | AUC |
 |---|---|---|---|---|---|
-| no nearby opponent extrapolated | 294 | 29 | 30.1 | 0.2767 | 0.791 |
-| some nearby opponents extrapolated | 230 | 31 | 26.6 | 0.3634 | 0.720 |
+| no nearby opponent extrapolated | 294 | 29 | 32.4 | 0.2926 | 0.754 |
+| some nearby opponents extrapolated | 230 | 31 | 27.6 | 0.3724 | 0.690 |
 
 ![xG calibration](../figs/w3_xg_calibration.png)
 
 ## Caveats
 
-- Trained on European top flights (2015/16) plus one Indian Super League season; the A-League check above is the only evidence it transfers. In the held-out lower league (ISL) goals exceed xG by 14%, and on the A-League shots by 6%: the model may slightly undervalue chances outside the European top flights.
-- SkillCorner positions at the shot frame can be extrapolated. When any opponent near the shooter is, the model ranks shots less well and undercounts goals (split above).
-- Penalties are excluded from the model. SkillCorner does not label them; two shots from the spot with a short possession are treated as penalties.
-- Goals are possessions followed by `goal_for`. Five of the 66 goals in the final scores are not on a shot-tagged possession and so are missing here (see the README).
+- 60 goals is a small sample for an xG model; the ridge penalty and the held-out choice keep it simple. The model is used for its shape (how danger rises toward goal), as the danger map and as the value of a shot in expected threat, more than for single-shot estimates.
+- SkillCorner positions at the shot frame can be extrapolated (split above).
+- Penalties are excluded from the model and set to 0.76 xG. SkillCorner does not label them; shots from the spot at the start of a short possession are treated as penalties.
+- Goals are possessions followed by `goal_for`. A few goals in the final scores are not on a shot-tagged possession and so are missing here (see the README).
 
-Outputs: `data/derived/skillcorner_shots_xg.csv` (one row per SkillCorner shot), `data/derived/xg_model.json` (coefficients).
+Outputs: `data/derived/skillcorner_shots_xg.csv` (one row per shot, in-sample and held-out xG), `data/derived/xg_model.json` (coefficients).

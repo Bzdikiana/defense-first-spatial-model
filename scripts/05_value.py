@@ -3,10 +3,9 @@ Week 3: the danger surface V(x) and the accessibility weight A(x | ball).
 
 1. Expected threat (xT, 12 x 8 zones) fitted on the 20 matches' player
    possessions, with each zone's shot value from the xG model (a typical
-   A-League shot from the zone centre). Compared with Karun Singh's published
-   grid, and validated by how well the xT of where a possession starts ranks
-   whether that team possession produces a shot (match-grouped 5-fold CV;
-   baselines: Singh's grid, distance to goal).
+   A-League shot from the zone centre), validated by how well the xT of where
+   a possession starts ranks whether that team possession produces a shot
+   (match-grouped 5-fold CV; baselines: xG from here, distance to goal).
 2. Ball-transition model (where the ball goes next): isotropic Gaussian
    (Spearman-style), forward-shifted Gaussian, and 2- and 3-component mixtures,
    compared by held-out log-likelihood (match-grouped 5-fold CV).
@@ -96,7 +95,6 @@ def main():
     acts, poss, trs = build_tables()
     xg_at, ctx = shot_value_fn()
     g = V.zone_shot_value(NX, NY, xg_at)
-    singh = np.array(json.loads((DERIVED / "singh_xt_12x8.json").read_text()))
     fold = match_folds(acts["match_id"].unique())
 
     # ----- xT: fit, compare, validate -----------------------------------------
@@ -114,11 +112,9 @@ def main():
     xt_val = pd.DataFrame([
         dict(model="xT fitted on A-League, interpolated (used for TC; out of fold)", auc=M.auc(y, oof_interp)),
         dict(model="xT fitted on A-League, zone value (out of fold)", auc=M.auc(y, oof_zone)),
-        dict(model="Singh's published xT, interpolated", auc=M.auc(y, V.zone_value_at(singh, poss["x01"], poss["y01"]))),
         dict(model="xG of a typical shot from here", auc=M.auc(y, xg_at(np.hypot(xm, ym), ang))),
         dict(model="distance to goal (closer = higher)", auc=M.auc(y, -poss["dist_goal"].to_numpy())),
     ])
-    corr = float(np.corrcoef(xt.ravel(), singh.ravel())[0, 1])
 
     # ----- transition model ----------------------------------------------------
     tfold = trs["match_id"].map(fold).to_numpy()
@@ -146,25 +142,22 @@ def main():
                         sx=best.sx.tolist(), sy=best.sy.tolist())), indent=2))
 
     # ----- figures ------------------------------------------------------------
-    xt_figure(xt, singh)
+    xt_figure(xt)
     transition_figure(best, iso)
     frame_info = decomposition_figure(xt, best)
     off = offside_check()
-    write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, frame_info, off)
+    write_report(acts, poss, trs, xt, xt_val, tr_table, best_name, best, wins, frame_info, off)
     print(xt_val.round(4).to_string(index=False))
     print(tr_table.round(4).to_string(index=False))
 
 
-def xt_figure(xt, singh):
-    fig, axes = plt.subplots(1, 2, figsize=(11, 3.9))
+def xt_figure(xt):
+    fig, ax = plt.subplots(figsize=(6.2, 3.9))
     grid = PC.make_grid(105, 68)
-    vmax = max(xt.max(), singh.max())
-    for ax, z, title in ((axes[0], xt, "xT fitted on A-League (shot value from our xG)"),
-                         (axes[1], singh, "Singh's published xT")):
-        VZ.draw_pitch(ax)
-        im = VZ.plot_surface(ax, grid, V.zone_surface(z, grid, 105, 68), cmap="magma", vmin=0, vmax=vmax, alpha=1)
-        ax.set_title(title + " (attacking →)", fontsize=9)
-    fig.colorbar(im, ax=axes, shrink=0.8, label="xT")
+    VZ.draw_pitch(ax)
+    im = VZ.plot_surface(ax, grid, V.zone_surface(xt, grid, 105, 68), cmap="magma", vmin=0, vmax=xt.max(), alpha=1)
+    ax.set_title("xT fitted on A-League (shot value from the xG model; attacking →)", fontsize=9)
+    fig.colorbar(im, ax=ax, shrink=0.8, label="xT")
     fig.savefig(FIGS / "w3_xt.png", dpi=130, bbox_inches="tight"); plt.close(fig)
 
 
@@ -258,7 +251,7 @@ def offside_check() -> pd.DataFrame:
     return out
 
 
-def write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, best, wins, info, off):
+def write_report(acts, poss, trs, xt, xt_val, tr_table, best_name, best, wins, info, off):
     L = []
     w = L.append
     w("# Week 3: danger and accessibility\n")
@@ -275,9 +268,8 @@ def write_report(acts, poss, trs, xt, singh, corr, xt_val, tr_table, best_name, 
       "gets the ball). A zone's shot value is the xG model's value for a typical A-League shot from the "
       "zone centre (median blockers, keeper position and pressure; not a header), which avoids sparse "
       "zone-level goal counts.\n")
-    w(f"The fitted grid correlates **{corr:.2f}** with Karun Singh's published grid (fitted on "
-      f"European event data). Its maximum is higher ({xt.max():.3f} vs {singh.max():.3f}), in the zones "
-      "just in front of goal, where its shot value comes from the xG model rather than counts.\n")
+    w(f"The grid's maximum is {xt.max():.3f}, in the zones just in front of goal, where the shot value comes "
+      "from the xG model rather than from sparse goal counts.\n")
     w("Does a possession's starting xT rank whether that team possession produces a shot? "
       f"({len(poss):,} player possessions, {poss['lead_to_shot'].mean():.0%} in team possessions "
       "that led to a shot; the A-League fit is out of fold by match.)\n")

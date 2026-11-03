@@ -52,8 +52,12 @@ def _load(name, path):
 
 
 s07 = _load("s07", ROOT / "scripts" / "07_validation.py")
-s10 = _load("s10", ROOT / "scripts" / "10_confirmation.py")
 rng = np.random.default_rng(0)
+
+
+def load_skillcorner():
+    """Frames of all 20 matches (scripts/06_threat.py) and their possessions."""
+    return s07.load_frames(), pd.read_csv(DERIVED / "threat_possessions.csv")
 
 
 def all_events():
@@ -301,7 +305,7 @@ def engagement_figure(eng):
 
 # --------------------------------------------------------------------------- #
 def main():
-    frames, poss = s10.load_skillcorner()
+    frames, poss = load_skillcorner()
     ev = all_events()
     pp = ev[ev["event_type"] == "player_possession"][["match_id", "frame_start", "frame_end", "team_id",
                                                       "organised_defense"]]
@@ -311,7 +315,7 @@ def main():
     ok = (fr["frame"] <= fr["pp_end"] + FPS) & (fr["pp_team"] == fr["attacking_team_id"])
     fr.loc[~ok, "organised_defense"] = np.nan
     frames = fr.drop(columns=["pp_start", "pp_end", "pp_team"])
-    f = s10.frame_table(frames, poss, FPS).merge(poss[["match_id", "possession_id", "first_phase"]],
+    f = DF.shot_frames(frames, poss, FPS).merge(poss[["match_id", "possession_id", "first_phase"]],
                                                  on=["match_id", "possession_id"], how="left")
     phases = sorted(f["first_phase"].fillna("none").unique())
     print(f"{len(f):,} frames", flush=True)
@@ -321,7 +325,8 @@ def main():
     ft, oof = frame_cover_tests(f, phases)
     print("frame tests done", flush=True)
     het = heterogeneity(f, oof)
-    p = s10.possession_table(f, poss, FPS)
+    p = DF.possession_moments(f, poss, FPS).dropna(subset=["cover_at_peak", "cover_xg_here_at_peak"]
+                                                   ).reset_index(drop=True)
     p["first_phase"] = p["first_phase"].fillna("none")
     pbase, pt, rate, n = possession_cover_tests(p, sorted(p["first_phase"].unique()))
     print("possession tests done", flush=True)
@@ -346,9 +351,8 @@ def write_report(f, dec, ft, het, pbase, pt, rate, n, epv, eng, model, sp):
     w = L.append
     w("# The two-part model: the ball's situation and the defense's cover\n")
     w("**Status: exploratory.** These analyses were run on the 20 SkillCorner matches after the pre-declared "
-      "Week 5 test failed ([w5_validation.md](w5_validation.md)). The confirmation on independent data, "
-      "pre-registered before it was run, is [w6_confirmation.md](w6_confirmation.md). Script: "
-      "`scripts/08_two_part.py`; model: `dsv/defense.py`.\n")
+      "Week 5 test failed ([w5_validation.md](w5_validation.md)), so treat them as a well-supported lead rather "
+      "than a confirmed result. Script: `scripts/08_two_part.py`; model: `dsv/defense.py`.\n")
     w("## 1. Why the product failed\n")
     w("Threat Conceded multiplies reachable danger (where the ball is and can go) by the share the defense "
       "leaves uncovered, so log TC = log RD + log(1 − cover). In a model of a shot within 5 s, that forces "
@@ -416,10 +420,17 @@ def write_report(f, dec, ft, het, pbase, pt, rate, n, epv, eng, model, sp):
         w(f"| {r['outcome']} | {r['n']:,} | {r['d_ball_xg']:+.2f} [{r['d_ball_xg_lo']:+.2f}, {r['d_ball_xg_hi']:+.2f}] | "
           f"{r['d_def_xg']:+.2f} [{r['d_def_xg_lo']:+.2f}, {r['d_def_xg_hi']:+.2f}] | "
           f"{r['d_def_xt']:+.2f} [{r['d_def_xt_lo']:+.2f}, {r['d_def_xt_hi']:+.2f}] |")
-    w("\nWhen the presser is beaten, the uncovered share of the shooting danger jumps more than for any other "
-      "outcome; with the xT map this shows up much less. Every flagged outcome opens some space: even a press "
-      "that forces the ball backward, which cuts ball danger sharply, leaves the defense covering a smaller "
-      "share of what remains. That trade-off is what the pressing analysis (Layer 3) will weigh. "
+    e = eng.set_index("outcome")
+    flagged = e.drop(index="no flagged outcome")
+    top = flagged["d_def_xg"].idxmax()
+    opens = (flagged["d_def_xg_lo"] > e.loc["no flagged outcome", "d_def_xg_hi"]).all()
+    w(f"\nThe largest rise in the uncovered share follows presses flagged \"{top}\" "
+      f"({e.loc[top, 'd_def_xg']:+.2f}); after a beaten press it is {e.loc['beaten', 'd_def_xg']:+.2f}, against "
+      f"{e.loc['no flagged outcome', 'd_def_xg']:+.2f} when no outcome is flagged. "
+      + ("Every flagged outcome opens more space than an unflagged engagement: " if opens else
+         "Most flagged outcomes open some space: ")
+      + "a press that forces the ball backward cuts ball danger sharply but leaves the defense covering a smaller "
+      "share of what remains. That trade-off is what the pressing analysis weighs ([w7_pressing.md](w7_pressing.md)). "
       "\"Stopped danger\" engagements usually end the possession, so the few that remain are not typical.\n")
     w("![engagements](../figs/w6_engagements.png)\n")
     w("## 5. The fitted model\n")

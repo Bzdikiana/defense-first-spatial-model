@@ -6,15 +6,14 @@ Threat Conceded weights the attacking team's pitch control by **danger** V(x) (h
 
 Markov xT (Singh 2018) on 12 x 8 zones from 26,164 actions in player possessions (526 shots; 84% of moves kept the ball). Each possession contributes a carry (start to end, if at least 3 m) and a release (a shot, or a move to where the team's next possession starts; failed if the other team gets the ball). A zone's shot value is the xG model's value for a typical A-League shot from the zone centre (median blockers, keeper position and pressure; not a header), which avoids sparse zone-level goal counts.
 
-The fitted grid correlates **0.99** with Karun Singh's published grid (fitted on European event data). Its maximum is higher (0.377 vs 0.257), in the zones just in front of goal, where its shot value comes from the xG model rather than counts.
+The grid's maximum is 0.302, in the zones just in front of goal, where the shot value comes from the xG model rather than from sparse goal counts.
 
 Does a possession's starting xT rank whether that team possession produces a shot? (18,697 player possessions, 8% in team possessions that led to a shot; the A-League fit is out of fold by match.)
 
 | model | AUC |
 |---|---|
-| xT fitted on A-League, interpolated (used for TC; out of fold) | 0.857 |
-| xT fitted on A-League, zone value (out of fold) | 0.855 |
-| Singh's published xT, interpolated | 0.856 |
+| xT fitted on A-League, interpolated (used for TC; out of fold) | 0.859 |
+| xT fitted on A-League, zone value (out of fold) | 0.856 |
 | xG of a typical shot from here | 0.861 |
 | distance to goal (closer = higher) | 0.861 |
 
@@ -48,7 +47,7 @@ Most next touches are short and roughly centred on the ball; a minority are long
 
 Attacking control uses `SKILLCORNER_OPEN_DATA`. Threat Conceded for the frame is the sum over cells of control x V x A. A sums to 1, so TC is the expected xT of where the ball goes next, counted only where the attack would control it.
 
-Frame 60623 (21/22 players detected): TC = 0.0115 xT.
+Frame 60623 (21/22 players detected): TC = 0.0106 xT.
 
 ![decomposition](../figs/w3_tc_decomposition.png)
 

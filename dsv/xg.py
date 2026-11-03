@@ -1,49 +1,36 @@
 """
 dsv.xg
 ======
-An expected-goals model that transfers to SkillCorner tracking.
+An expected-goals model for SkillCorner tracking, fitted on the SkillCorner
+open-data shots alone (the Analytics Cup allows only the competition's data).
 
-The SkillCorner open data has shots but no xG. This module trains a small,
-transparent xG model on StatsBomb open data and applies it to SkillCorner
-shots. It uses only features both sources provide: shot geometry, headers, and
-the positions of every player at the moment of the shot (StatsBomb freeze
-frames; SkillCorner tracking).
+Features come from the tracking at the shot frame: shot geometry, headers,
+and the positions of the opponents and the keeper. `skillcorner_shots`
+builds the shot table; `fit_xg` / `predict_xg` fit and apply the logistic
+model; `OPEN_DATA_XG` holds the fitted coefficients (scripts/04_xg.py,
+reports/w3_xg.md).
 
 Frame: metres, shooting team attacks +x, goal centre at (GOAL_X, 0), posts at
-y = +-3.66. StatsBomb coordinates are 120 x 80 "yards" with true-to-scale
-penalty areas and goals, so positions are taken relative to the goal and
-converted at 0.9144 m per yard.
-
-StatsBomb open data: https://github.com/statsbomb/open-data (free to use with
-attribution to StatsBomb).
+y = +-3.66.
 """
 from __future__ import annotations
 
-import json
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from . import metrics as M
 
-SB_RAW = "https://raw.githubusercontent.com/statsbomb/open-data/master/data"
-YD = 0.9144
 GOAL_X = 0.0          # features are computed relative to the goal line
 POST_Y = 7.32 / 2
 
-# 2015/16 Premier League, La Liga, Serie A and Ligue 1 (all matches) and the
-# 2021/22 Indian Super League: 1,632 matches.
-TRAIN_SEASONS = [(2, 27), (11, 27), (12, 27), (7, 27), (1238, 108)]
 FEATURES = ["dist", "log_dist", "angle", "header", "n_block", "gk_off_line",
             "gk_dist_goal", "press_dist", "n_close"]
 
 
 # --------------------------------------------------------------------------- #
-# Features (shared by both data sources)
+# Features
 # --------------------------------------------------------------------------- #
 def _in_triangle(p, a, b, c):
     """Boolean mask: points p (k, 2) inside triangle abc."""
@@ -82,71 +69,6 @@ def shot_features(shot_xy, header: bool, opp_xy, gk_xy: Optional[np.ndarray]) ->
                 header=float(header), n_block=float(n_block), gk_off_line=min(gk_off_line, 20.0),
                 gk_dist_goal=min(gk_dist_goal, 30.0), press_dist=float(min(d_all.min(), 10.0)),
                 n_close=float((d_all < 3.0).sum()))
-
-
-# --------------------------------------------------------------------------- #
-# StatsBomb
-# --------------------------------------------------------------------------- #
-def _sb_to_goal_frame(loc):
-    """StatsBomb [x, y] (yards, attacking +x to x=120, goal centre y=40) to
-    metres relative to the goal centre."""
-    return np.array([(loc[0] - 120.0) * YD, (40.0 - loc[1]) * YD])
-
-
-def _get_json(url: str):
-    with urllib.request.urlopen(url, timeout=60) as r:
-        return json.loads(r.read().decode("utf-8"))
-
-
-def statsbomb_shots_from_events(events: list, match_id: int) -> list[dict]:
-    rows = []
-    for e in events:
-        if e.get("type", {}).get("name") != "Shot":
-            continue
-        shot = e["shot"]
-        stype = shot.get("type", {}).get("name")
-        ff = shot.get("freeze_frame")
-        if stype == "Penalty" or not ff:
-            continue
-        s = _sb_to_goal_frame(e["location"])
-        opp = [_sb_to_goal_frame(p["location"]) for p in ff
-               if not p["teammate"] and p.get("position", {}).get("name") != "Goalkeeper"]
-        gk = [_sb_to_goal_frame(p["location"]) for p in ff
-              if not p["teammate"] and p.get("position", {}).get("name") == "Goalkeeper"]
-        header = shot.get("body_part", {}).get("name") == "Head"
-        f = shot_features(s, header, np.array(opp).reshape(-1, 2), gk[0] if gk else None)
-        rows.append(dict(match_id=match_id, minute=e.get("minute"), shot_type=stype,
-                         play_pattern=e.get("play_pattern", {}).get("name"),
-                         goal=shot.get("outcome", {}).get("name") == "Goal",
-                         statsbomb_xg=shot.get("statsbomb_xg"), **f))
-    return rows
-
-
-def fetch_statsbomb_shots(out_csv: str | Path, seasons: Iterable = TRAIN_SEASONS,
-                          workers: int = 8) -> pd.DataFrame:
-    """Download the seasons' event files and keep only shot rows with features
-    (penalties and shots without freeze frames dropped). Cached at out_csv."""
-    out_csv = Path(out_csv)
-    if out_csv.exists():
-        return pd.read_csv(out_csv)
-    jobs = []
-    for comp, season in seasons:
-        for m in _get_json(f"{SB_RAW}/matches/{comp}/{season}.json"):
-            jobs.append((comp, season, m["match_id"]))
-
-    def one(job):
-        comp, season, mid = job
-        rows = statsbomb_shots_from_events(_get_json(f"{SB_RAW}/events/{mid}.json"), mid)
-        for r in rows:
-            r.update(competition_id=comp, season_id=season)
-        return rows
-
-    with ThreadPoolExecutor(workers) as ex:
-        rows = [r for part in ex.map(one, jobs) for r in part]
-    df = pd.DataFrame(rows)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out_csv, index=False)
-    return df
 
 
 # --------------------------------------------------------------------------- #
@@ -213,14 +135,15 @@ def predict_xg(model: dict, df: pd.DataFrame) -> np.ndarray:
     return M.predict_logistic(model["coef"], design(df, model["features"]))
 
 
-# Fitted on 40,541 StatsBomb open-data shots (scripts/04_xg.py,
-# reports/w3_xg.md). Leave-one-league-out AUC 0.800; on the 524 non-penalty
-# SkillCorner open-data shots AUC 0.755 and 56.7 xG for 60 goals. Coefficients
-# are [intercept, *FEATURES, angle^2, dist*header] on the raw features.
+# Fitted on the 524 non-penalty SkillCorner open-data shots (60 goals), full
+# features, ridge 0.01 chosen by leave-one-match-out log loss (scripts/04_xg.py,
+# reports/w3_xg.md): held-out log loss 0.328 (constant rate 0.359), AUC 0.72,
+# 60.0 xG for 60 goals. Coefficients are [intercept, *FEATURES, angle^2,
+# dist*header] on the raw features.
 OPEN_DATA_XG = dict(features=list(FEATURES), coef=np.array([
-    -4.9881467802812605, -0.14006425138607714, 0.9531096018597013, 3.595684559713745,
-    -0.5526998803123565, -0.3622347747365759, 0.020532306647584684, 0.15127542373294017,
-    0.2416655123118095, -0.051978810552150194, -0.5265501036040059, -0.03683984197569169,
+    -0.36038873983259845, -0.05722641204383733, -0.6544079187725333, 0.9527467243662217,
+    -0.5009370079992108, -0.10410573556283778, 0.05732102366686082, 0.09563185224855306,
+    0.1156509279638444, -0.183533726740007, -0.02196428776013739, 0.037582051718371305,
 ]))
 
 
@@ -229,3 +152,24 @@ def xg_for_shots(shots: pd.DataFrame, model: dict = OPEN_DATA_XG) -> np.ndarray:
     `skillcorner_shots`. Penalties are not modelled: set them yourself
     (about 0.76)."""
     return predict_xg(model, shots)
+
+
+# Median context of the SkillCorner open-data shots: no blocker in the shooting
+# triangle, keeper 0.44 m off the shot line and 3.2 m from the goal centre,
+# nearest opponent 2.2 m away, one opponent within 3 m.
+TYPICAL_SHOT_CONTEXT = dict(n_block=0.0, gk_off_line=0.43943801674550526, gk_dist_goal=3.243262235344732,
+                            press_dist=2.188132193991036, n_close=1.0)
+
+
+def xg_from_here(cells_att: np.ndarray, length: float, width: float, model: dict = OPEN_DATA_XG,
+                 context: dict = TYPICAL_SHOT_CONTEXT) -> np.ndarray:
+    """xG of a typical shot (not a header, median context) from each point:
+    the shooting-danger map used beside expected threat. `cells_att` is
+    (k, 2) in metres in the attacking frame, goal attacked at x = length / 2;
+    `width` is unused but kept for the danger-map signature."""
+    gx, gy = cells_att[:, 0] - length / 2, cells_att[:, 1]
+    dist = np.hypot(gx, gy)
+    angle = np.abs(np.arctan2(POST_Y - gy, -gx) - np.arctan2(-POST_Y - gy, -gx))
+    df = pd.DataFrame({"dist": dist, "log_dist": np.log(np.maximum(dist, 0.5)), "angle": angle,
+                       "header": 0.0, **context})
+    return predict_xg(model, df)

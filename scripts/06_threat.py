@@ -21,7 +21,6 @@ Run from the repo root:  py scripts/06_threat.py   (about an hour the first time
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -47,7 +46,7 @@ LOOKBACK_S = 2.0      # possession-level: peak at least 2 s before the shot
 FOCAL = 1925299
 N_BOOT = 2000
 # per-frame comparison measures kept for the shot-prediction test
-EXTRA = ["space_m2", "tc_no_access", "tc_voronoi", "tc_singh_xt", "tc_xg_here", "tc_iso_access",
+EXTRA = ["space_m2", "tc_no_access", "tc_voronoi", "tc_xg_here", "rd_xg_here", "tc_iso_access",
          "def_goal_side"]
 
 
@@ -59,27 +58,13 @@ def load(mid):
 
 
 def comparisons():
-    """Alternative ingredients for baselines and sensitivity checks: Karun
-    Singh's published xT and "xG of a typical shot from here" as danger
-    surfaces, and the single isotropic Gaussian as the next-ball model."""
-    singh = np.array(json.loads((DERIVED / "singh_xt_12x8.json").read_text()))
-    sc = pd.read_csv(DERIVED / "skillcorner_shots.csv")
-    ctx = sc[["n_block", "gk_off_line", "gk_dist_goal", "press_dist", "n_close"]].median().to_dict()
-
-    def singh_xt(c, L, W):
-        return V.zone_value_at(singh, c[:, 0] / L + 0.5, c[:, 1] / W + 0.5)
-
-    def xg_here(c, L, W):
-        gx, gy = c[:, 0] - L / 2, c[:, 1]
-        dist = np.hypot(gx, gy)
-        angle = np.abs(np.arctan2(3.66 - gy, -gx) - np.arctan2(-3.66 - gy, -gx))
-        df = pd.DataFrame({"dist": dist, "log_dist": np.log(np.maximum(dist, 0.5)), "angle": angle,
-                           "header": 0.0, **ctx})
-        return xg.xg_for_shots(df)
-
+    """Alternative ingredients for baselines and sensitivity checks: "xG of a
+    typical shot from here" as the danger surface, and the single isotropic
+    Gaussian as the next-ball model. Everything is fitted on the SkillCorner
+    open data."""
     trs = pd.read_pickle(DERIVED / "value_tables.pkl")[2]
     iso = V.fit_transition(trs, k=1, isotropic=True)
-    return T.Comparisons(values={"singh_xt": singh_xt, "xg_here": xg_here},
+    return T.Comparisons(values={"xg_here": xg.xg_from_here},
                          transitions={"iso_access": iso})
 
 

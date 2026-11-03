@@ -51,7 +51,6 @@ POSS_MEASURES = {
 }
 SENSITIVITY = {
     "peak_tc_early": "Threat Conceded (A-League xT, fitted next-ball model)",
-    "peak_tc_singh_xt_early": "with Singh's published xT",
     "peak_tc_xg_here_early": "with xG-from-here as danger",
     "peak_tc_iso_access_early": "with a single-Gaussian next-ball model",
 }
@@ -105,7 +104,8 @@ def possession_table(frames, poss):
                      on=["match_id", "possession_id"])
     f = f[f["frame"] <= f["first_shot_frame"].fillna(f["frame_end"]) - LOOKBACK_S * 10].copy()
     f["dist_goal"] = np.hypot(52.5 - f["ball_x"], f["ball_y"])
-    f["rd_xg_here"] = reachable_xg_here(f.reset_index(drop=True)).tolist() if len(f) else []
+    if "rd_xg_here" not in f.columns:      # frames computed before 06 stored it
+        f["rd_xg_here"] = reachable_xg_here(f.reset_index(drop=True)).tolist() if len(f) else []
     g = f.sort_values("frame").groupby(["match_id", "possession_id"])
     extra = pd.DataFrame({
         "peak_rd_xg_here_early": g["rd_xg_here"].max(),
@@ -114,6 +114,7 @@ def possession_table(frames, poss):
         "mean_def_goal_side_early": g["def_goal_side"].mean(),
         "mean_def_extrap_early": g["def_extrap_share"].mean(),
     }).reset_index()
+    poss = poss.drop(columns=[c for c in extra.columns if c in poss.columns and c not in ("match_id", "possession_id")])
     p = poss.merge(extra, on=["match_id", "possession_id"], how="inner").dropna(subset=["peak_tc_early"])
     p["y"] = (p["shot"].astype(bool) | p["goal"].astype(bool)).astype(int)
     p["log_duration"] = np.log(p["duration_s"].clip(lower=0.5))
@@ -234,7 +235,7 @@ def main():
         "+ Threat Conceded vs + reachable danger": boot_diff(p, y, oof_d["peak_tc_early"], oof_d["peak_rd_early"]),
     }
     # B. danger surface chosen inside each training fold, scored on the held-out match
-    nested, picks = nested_choice(p, ["peak_tc_early", "peak_tc_singh_xt_early", "peak_tc_xg_here_early"], phases)
+    nested, picks = nested_choice(p, ["peak_tc_early", "peak_tc_xg_here_early"], phases)
     nested_vs = boot_diff(p, y, nested, oof["neg_min_dist"])
     # C. with xG-from-here as the danger map: is the gain the defense, or a
     #    better ball-location map? Compare with its own reachable danger.
@@ -387,10 +388,9 @@ def write_report(p, scores, vs, passed, add_rd, scores_s, scores_hi, det_med, xg
         w(f"| {k} | {v['dll']:+.4f} [{v['dll_lo']:+.4f}, {v['dll_hi']:+.4f}] | "
           f"{v['dauc']:+.3f} [{v['dauc_lo']:+.3f}, {v['dauc_hi']:+.3f}] |")
     counts = pd.Series(picks).value_counts()
-    names = {"peak_tc_early": "A-League xT", "peak_tc_singh_xt_early": "Singh's xT",
-             "peak_tc_xg_here_early": "xG from here"}
+    names = {"peak_tc_early": "A-League xT", "peak_tc_xg_here_early": "xG from here"}
     y = p["y"].to_numpy()
-    w(f"\n**B. Danger surface chosen fairly.** In each fold the danger surface (A-League xT, Singh's xT or "
+    w(f"\n**B. Danger surface chosen fairly.** In each fold the danger surface (A-League xT or "
       "xG from here) is chosen on the training matches only, then the held-out match is predicted with it. "
       "Chosen: " + ", ".join(f"{names[k]} in {v} of {len(picks)} folds" for k, v in counts.items())
       + f". Held-out log loss {M.log_loss(y, nested):.4f}, AUC {M.auc(y, nested):.3f}. Against ball "

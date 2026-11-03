@@ -199,17 +199,24 @@ def write_report(df, by, add, auc, ll0, ll1):
       f"uncovered share and the defender's starting share give log loss {ll0:.4f}; adding the pressing "
       f"defender's own loss of cover gives {ll1:.4f} (difference {add['dll']:+.4f} [{add['dll_lo']:+.4f}, "
       f"{add['dll_hi']:+.4f}]; AUC {add['dauc']:+.3f} [{add['dauc_lo']:+.3f}, {add['dauc_hi']:+.3f}]).\n")
+    b = by.set_index("outcome")
+    top = b["d_uncovered"].idxmax()
+    team_auc, own_auc = auc["team's loss of cover"], auc["pressing defender's own loss of cover"]
     w("## Reading\n")
-    w("- **The team side agrees with SkillCorner.** When the presser is beaten, the share of the shooting danger "
-      "the whole defense leaves uncovered rises far more than after any other kind of engagement.")
-    w("- **The individual side is weak.** The pressing defender loses some of their share in every flagged "
-      "outcome, most of all when they stopped the danger (stepping in to win the ball also leaves space). Their "
-      "own loss separates \"beaten\" from other engagements only slightly (AUC above), and they are the "
-      "defender blamed most in about one beaten engagement in eight.")
-    w("- **Where the lost cover goes.** After a beaten press, most of the cover lost belongs to teammates: the "
-      "space that opens is behind the presser, where others should be covering. Blame by lost share therefore "
-      "points at the cover structure around a press, not at the presser alone. Judging the press itself needs "
-      "the counterfactual of Layer 3 (what if they had held position), not attribution.\n")
+    w(f"- **The team side.** After a beaten press the share of the shooting danger the defense leaves uncovered "
+      f"changes by {b.loc['beaten', 'd_uncovered']:+.2f} (log scale), against "
+      f"{b.loc['no flagged outcome', 'd_uncovered']:+.2f} when no outcome is flagged; the largest change follows "
+      f"\"{top}\" ({b.loc[top, 'd_uncovered']:+.2f}). The team's loss of cover separates beaten presses from the "
+      f"rest with AUC {team_auc:.2f}.")
+    w(f"- **The individual side.** The pressing defender's own lost share separates \"beaten\" with AUC "
+      f"{own_auc:.2f}, and they are the defender blamed most in "
+      f"{b.loc['beaten', 'blamed_most']:.0%} of beaten presses against {b.loc['no flagged outcome', 'blamed_most']:.0%} "
+      "of presses with no flagged outcome. Blaming the individual presser by lost cover does not single out "
+      "the beaten ones.")
+    w(f"- **Where the lost cover goes.** After a beaten press, the presser holds "
+      f"{b.loc['beaten', 'share_of_drop']:.0%} of the team's drop in cover on average; the rest belongs to "
+      "teammates, since the space that opens is behind the presser. Judging the press itself needs the "
+      "comparison with typical play in [w7_pressing.md](w7_pressing.md), not attribution.\n")
     w("SkillCorner's flags are themselves computed from tracking geometry, so agreement shows the two "
       "constructions see the same events, not that either is ground truth.\n")
     (REPORTS / "w6_attribution.md").write_text("\n".join(L) + "\n", encoding="utf-8")

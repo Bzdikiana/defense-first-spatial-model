@@ -57,7 +57,6 @@ def _load(name, path):
 
 s06 = _load("s06", ROOT / "scripts" / "06_threat.py")
 s07 = _load("s07", ROOT / "scripts" / "07_validation.py")
-s10 = _load("s10", ROOT / "scripts" / "10_confirmation.py")
 rng = np.random.default_rng(0)
 
 
@@ -351,8 +350,8 @@ def main():
         parts.append(match_presses(mid, vt, values, model_t))
         print(f"  {mid}: {len(parts[-1])} presses, {(time.perf_counter() - t0) / 60:.1f} min", flush=True)
     pr = pd.concat(parts, ignore_index=True)
-    frames, poss = s10.load_skillcorner()
-    f = s10.frame_table(frames, poss, FPS)
+    frames, poss = s07.load_frames(), pd.read_csv(DERIVED / "threat_possessions.csv")
+    f = DF.shot_frames(frames, poss, FPS)
     pr, model, typical, f = values_for_presses(pr, f, poss)
     dec_x = pr.merge(f[["match_id", "possession_id", "frame", "ball_x"]].rename(columns={"frame": "t_dec"}),
                      on=["match_id", "possession_id", "t_dec"], how="left")["ball_x"].to_numpy()

@@ -145,6 +145,31 @@ def shots_prevented(model: TwoPartModel, typical: TypicalCover, df: pd.DataFrame
     return (p_typ - p_act) * frame_dt / horizon_s
 
 
+def shot_frames(frames: pd.DataFrame, possessions: pd.DataFrame, fps: float, horizon_s: float = 5.0,
+                box_x: float = 52.5 - 16.5, box_y: float = 20.16) -> pd.DataFrame:
+    """Frame table for the two-part model: frames up to each possession's
+    first shot, with y (the shot comes within `horizon_s`), cover_xg_here,
+    in_box (the ball is in the penalty area) and box_next (it enters the
+    area within `horizon_s`, same possession). `frames` is
+    `dsv.threat.match_threat` output with the xg_here comparison."""
+    f = frames.drop(columns=[c for c in ("first_shot_frame",) if c in frames.columns]).merge(
+        possessions[["match_id", "possession_id", "first_shot_frame"]], on=["match_id", "possession_id"])
+    lead = (f["first_shot_frame"] - f["frame"]) / fps
+    f = f[~(lead < 0)].copy()
+    f["y"] = lead.loc[f.index].between(0, horizon_s, inclusive="right").astype(int)
+    f = f.dropna(subset=["tc", "rd", "cover", "tc_xg_here", "rd_xg_here", "ball_x", "ball_y"])
+    f = add_cover_columns(f).sort_values(["match_id", "possession_id", "frame"]).reset_index(drop=True)
+    f["in_box"] = (f["ball_x"] > box_x) & (f["ball_y"].abs() < box_y)
+    box_next = np.zeros(len(f), int)
+    fr, ib = f["frame"].to_numpy(), f["in_box"].to_numpy().astype(int)
+    for idx in f.groupby(["match_id", "possession_id"]).indices.values():
+        c = np.concatenate([[0], np.cumsum(ib[idx])])
+        hi = np.searchsorted(fr[idx], fr[idx] + horizon_s * fps, side="right")
+        box_next[idx] = (c[hi] - c[np.arange(len(idx)) + 1]) > 0
+    f["box_next"] = box_next
+    return f
+
+
 # --------------------------------------------------------------------------- #
 # Possession level
 # --------------------------------------------------------------------------- #
@@ -220,6 +245,29 @@ def reachable_danger(ball_x, ball_y, cells_att: np.ndarray, values: np.ndarray, 
     return out
 
 
-__all__ = ["add_cover_columns", "ball_features", "design", "TwoPartModel", "fit_two_part", "TypicalCover",
+__all__ = ["add_cover_columns", "shot_frames", "ball_features", "design", "TwoPartModel", "fit_two_part", "TypicalCover",
            "fit_typical_cover", "shots_prevented", "possession_moments", "possession_design",
-           "reachable_danger", "logit"]
+           "reachable_danger", "logit", "OPEN_DATA_TWO_PART", "OPEN_DATA_TYPICAL_COVER"]
+
+
+# --------------------------------------------------------------------------- #
+# Fitted on the 20 SkillCorner open-data matches
+# --------------------------------------------------------------------------- #
+# Shot within 5 s from 308,004 frames (5 per second, 10,028 followed by a
+# shot), xG-from-here cover (scripts/08_two_part.py, reports/w6_two_part.md).
+# Coefficients: intercept, time in possession, defenders goal-side, distance,
+# distance^2, goal-mouth angle, |y|, x, log reachable danger (xT), log
+# reachable danger (xG from here), logit cover.
+OPEN_DATA_TWO_PART = TwoPartModel(coef=np.array([
+    2.147685529615747, -0.003954352481676918, -0.09841600357806148, -0.06282893481184518,
+    -0.001264098020386546, 0.26484764013013057, -0.0074422873987725, -0.043275529037481594,
+    -1.0845818343339175, 0.571472981489067, -1.0422175913438154,
+]), controls=FRAME_CONTROLS, cover_col="cover_xg_here")
+# Typical cover in a situation: intercept, distance, distance^2, angle, |y|, x,
+# log reachable danger (xT), log reachable danger (xG from here), defenders
+# goal-side; logit scale.
+OPEN_DATA_TYPICAL_COVER = TypicalCover(coef=np.array([
+    4.942854756316365, 0.03555940617867066, -0.00011806739385454092, 0.08968538268084161,
+    0.009157879228563568, -0.04735357673806021, -0.34480319645599833, 1.317441408345691,
+    -0.11416817528326369,
+]), cover_col="cover_xg_here")

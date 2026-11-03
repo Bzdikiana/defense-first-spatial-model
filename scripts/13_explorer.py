@@ -44,7 +44,7 @@ def _load(name, path):
 
 
 s06 = _load("s06", ROOT / "scripts" / "06_threat.py")
-s10 = _load("s10", ROOT / "scripts" / "10_confirmation.py")
+s07 = _load("s07", ROOT / "scripts" / "07_validation.py")
 
 
 # --------------------------------------------------------------------------- #
@@ -247,8 +247,8 @@ def possession_payload(pk, vt, xg_fn, model, typical, model_t):
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     model_t = T.ThreatModel()
-    frames, poss_all = s10.load_skillcorner()
-    f = s10.frame_table(frames, poss_all, FPS)
+    frames, poss_all = s07.load_frames(), pd.read_csv(DERIVED / "threat_possessions.csv")
+    f = DF.shot_frames(frames, poss_all, FPS)
     model = DF.fit_two_part(f, f["y"], cover_col="cover_xg_here")
     typical = DF.fit_typical_cover(f, cover_col="cover_xg_here")
     pr = pd.read_csv(DERIVED / "press_values.csv")

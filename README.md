@@ -1,333 +1,102 @@
-# Defensive Space Value (dsv)
+# Defensive Cover
 
-A defense-first spatial model on SkillCorner open data (A-League 2024/25, 20 matches):
-how much dangerous space a team concedes over time (Threat Conceded), which defenders
-are responsible, and whether specific defensive actions were the right call.
-The design is in [analytics-cup-brief.md](analytics-cup-brief.md). The main finding (at a
-given ball situation, more defensive cover means fewer shots) was pre-registered and
-confirmed on independent data, the open DFL/Sportec matches.
+**How much danger does a defense leave open, and does it change what happens next?**
+A tracking-based measure of defending for the SkillCorner X PySport Analytics Cup (research
+track), built on the SkillCorner open data (A-League 2024/25, 20 matches) and shipped as the
+`dsv` Python package.
 
-## Pitch control fitted to SkillCorner open data
+Video (1 minute): *link to be added*
 
-Most public pitch-control code ships with parameters from Spearman (2017), set on
-different data. Here the model is **fitted to 15,078 passes from all 20 SkillCorner
-open-data matches and validated on held-out matches** (match-grouped 5-fold
-cross-validation). Full write-up: [reports/w2_parameter_fit.md](reports/w2_parameter_fit.md).
+## Introduction
 
-| model, scored on held-out matches | log loss | AUC |
-|---|---|---|
-| `SKILLCORNER_OPEN_DATA` (fitted, detection-aware) | **0.224** | **0.937** |
-| `SKILLCORNER_OPEN_DATA_NO_FLAGS` (fitted, no detection flags needed) | 0.225 | 0.937 |
-| logistic on nearest-teammate vs nearest-opponent distance + pass length | 0.243 | 0.907 |
-| `SPEARMAN_SHAW` (literature defaults, 5 m/s for everyone) | 0.262 | 0.932 |
-| Voronoi: is the nearest player to the destination a teammate? | 0.274 | 0.800 |
+Most defending never appears in event data: the best defensive work is the pass that is
+never played. Tracking data can see it, and many space metrics already exist (pitch
+control, threat-weighted pitch control, accessible space), but they are rarely tested
+against what happens on the pitch. This project asks a narrow, testable question: at a
+given moment, does the share of the dangerous space the defense covers predict whether the
+attack gets a shot, beyond where the ball is? And if it does, what does it say about
+pressing, the defensive action that trades space for a chance to win the ball?
 
-The score is the passing team's control where the ball ended up, used as the
-probability that the pass is completed.
+## Methods
 
-| parameter | literature | fitted |
-|---|---|---|
-| reaction time `t_react` | 0.7 s | 0.770 s |
-| arrival-time spread `sigma` | 0.45 s | 0.335 s |
-| spread for extrapolated positions `sigma_extrap` | – | 0.431 s |
-| ball speed | 15 m/s | 14.7 m/s |
-| control rate `lam` | 4.3 /s | 40 /s (bounded only from below) |
-| top speed | 5 m/s | each player's v95 per half, floored at their position group's 25th percentile |
+1. **Pitch control fitted to the open data.** Spearman's arrival-time model with parameters
+   fitted to 15,078 open-data passes (held out by match), each player's measured top
+   speed, and extra uncertainty for positions SkillCorner extrapolates off camera. Held-out
+   log loss 0.224 against 0.262 for the literature defaults.
+2. **Danger.** An xG model fitted on the competition's 524 shots from the tracking at the
+   shot frame, expected threat (xT) fitted on the 20 matches, and a fitted model of where
+   the ball goes next. *Reachable danger* is the danger of the places the ball can reach
+   next; the defense's *cover* is the share of it they would reach first.
+3. **A pre-declared test, and why it failed.** Our first metric multiplied the two (Threat
+   Conceded = reachable danger × uncovered share). Declared in advance: it must beat ball
+   distance to goal at predicting shots. It did not (held-out log loss 0.289 vs 0.283).
+   Fitted freely, the ball's situation weighs about 2.3 times as much as the defense's
+   share (2.43 vs 1.04 on the log scale), so the product hides the defense.
+4. **The two-part model.** A logistic model of a shot in the next 5 s from a flexible
+   description of the ball's situation plus the defense's cover, computed five times a
+   second for every possession, with a typical-cover model as the reference.
+5. **Pressing.** Each of SkillCorner's 14,872 on-ball engagements is measured 3 s after the
+   decision to press against typical play from the same situation: the effect on the ball
+   and on the defensive shape, in shots prevented.
 
-What the fit shows:
+Everything is evaluated on matches the model did not see (leave one match out) with
+match-bootstrap intervals.
 
-- **The literature defaults are miscalibrated on this data.** The fitted model has 14% lower
-  held-out log loss than the defaults: about half from refitting the parameters, half from
-  per-player top speed. It also beats the best simple baseline (95% match-bootstrap interval
-  of the log-loss difference: −0.026 to −0.012).
-- **Per-player top speed matters, more so once the model is fitted.** Against the same fitted
-  model with 5 m/s for everyone, it lowers log loss by 0.020 (95% interval 0.015–0.025).
-  Raw v95 alone gains 0.018 when fitted but only 0.011 under the literature parameters,
-  where it barely shows in AUC.
-  Overriding goalkeepers to 5 m/s makes things worse; their own v95 (about 3 m/s) predicts
-  better.
-- **Extrapolated positions are less certain, and the model can say so.** Players whose
-  position is SkillCorner's fill-in rather than a detection get 29% more arrival-time
-  spread. The overall gain is small: it helps most where both nearest players are
-  extrapolated and slightly hurts where exactly one is.
-- **The control rate is not identified.** Any `lam` from about 40/s upward fits equally
-  well: the data favour the limit where the ball goes to whoever gets there first (partly by
-  construction, since a pass's destination is where someone controlled it).
-- **Control is not a calibrated pass probability.** Out of fold, the model is underconfident
-  between 0.5 and 0.8 (passes it rates at 65% are completed about 80% of the time). If you
-  need pass probabilities, add a recalibration step.
+## Results
 
-### Quickstart
-
-```python
-from dsv import data as D, pitchcontrol as PC
-
-match_id = 1925299
-match_dir = D.download_open_match(match_id, "data")            # ~95 MB
-meta = D.load_match_metadata(match_dir, match_id)
-players, ball = D.normalize_direction(*D.load_tracking(match_dir, match_id, meta), meta)
-players = D.add_velocity(players)
-
-v95 = D.compute_v95(players, meta)                               # per player and half
-vmax = PC.vmax_lookup(PC.vmax_table(v95, floors=PC.SKILLCORNER_VMAX_FLOORS), match_id)
-params = PC.SKILLCORNER_OPEN_DATA
-
-# one frame, whole pitch
-frame = int(ball.loc[ball["possession_group"].notna(), "frame"].iloc[2000])
-state = PC.frame_state(players, ball, frame, meta, vmax, params)
-surface = PC.pitch_control(state, PC.make_grid(meta.pitch_length, meta.pitch_width), params)
-surface.attack                                                   # (68, 105) team in possession
-
-# many (frame, point) queries at once, e.g. every pass in the match (~0.02 s)
-passes = D.passes_with_destination(D.load_events(match_dir, match_id), ball, meta)
-batch = PC.point_batch(players, ball, passes["frame_end"], passes[["dest_x", "dest_y"]],
-                       meta, vmax, params)
-p_complete = PC.team_control_at_points(batch, passes["passer_home"].to_numpy(), params)
-```
-
-A runnable version is [examples/pitch_control_quickstart.py](examples/pitch_control_quickstart.py).
-With other tracking data, fill a `PC.PointBatch` (positions, velocities, top speeds,
-team flags, ball and target, in metres) or a `PC.FrameState` directly, and use
-`SKILLCORNER_OPEN_DATA_NO_FLAGS` unless your data marks extrapolated positions.
-To refit on your own passes: `PC.fit_params(batch, passer_home, success)`.
-
-## xG for SkillCorner open-data shots
-
-The open data has shots but no xG. `dsv.xg` provides one, trained on 40,541 StatsBomb
-open-data shots using only features SkillCorner tracking also has: shot geometry, headers,
-blockers in the shooting triangle, keeper position and pressure, taken from the tracking
-frame of the shot. Full write-up: [reports/w3_xg.md](reports/w3_xg.md).
-
-| | log loss | AUC | total xG vs goals |
-|---|---|---|---|
-| StatsBomb, held-out leagues | 0.257 | 0.800 | 3,892 vs 3,884 |
-| SkillCorner A-League shots (524, penalties excluded) | 0.315 | 0.755 | 56.7 vs 60 |
-| same, geometry only (no tracking context) | 0.330 | 0.715 | 55.9 vs 60 |
-
-```python
-from dsv import xg
-shots = xg.skillcorner_shots(events, players, ball, meta)   # one row per shot, with features
-shots["xg"] = xg.xg_for_shots(shots)                         # coefficients ship in dsv.xg.OPEN_DATA_XG
-```
-
-Caveats: it ranks shots less well when opponents near the shooter are extrapolated, and in
-the held-out lower league it undercounts goals by 14% (6% on the A-League shots).
-StatsBomb data is used under its open-data terms, with attribution
-([github.com/statsbomb/open-data](https://github.com/statsbomb/open-data)).
-
-## Danger and where the ball goes next
-
-`dsv.value` ships two surfaces fitted on the 20 matches ([reports/w3_value.md](reports/w3_value.md)):
-
-- `OPEN_DATA_XT`: Markov expected threat (12 x 8 zones) with each zone's shot value from the
-  xG model. It correlates 0.99 with Karun Singh's published grid. For ranking which
-  possessions lead to shots, every danger surface tried (this xT, Singh's grid, xG from the
-  location) lands within 0.006 AUC of plain distance to goal.
-- `OPEN_DATA_TRANSITION`: where the ball goes next given where it is. A two-part mixture
-  (76% short and centred on the ball, 24% long and about 18 m forward) beats the single
-  Gaussian used in Spearman-style models on held-out log-likelihood in all 20 matches.
-
-
-## Does Threat Conceded predict shots?
-
-Threat Conceded (TC) is the danger a defense allows at a moment: the attack's pitch control,
-weighted by where the ball can go next and how dangerous each spot is (`dsv.threat`). It was
-tested on 2,931 possessions from the 20 matches: does the peak TC, at least 2 s before any
-shot, predict that the possession produces a shot or goal? Logistic regression with the same
-controls for every measure, scored on held-out matches
-([reports/w5_validation.md](reports/w5_validation.md)).
-
-| measure (controls + ...) | held-out log loss | AUC |
-|---|---|---|
-| ball distance to goal (closest point) | 0.283 | 0.885 |
-| TC, xT as the danger map | 0.290 | 0.881 |
-| ball-location danger only (no defense) | 0.291 | 0.878 |
-| TC with nearest-player-wins instead of pitch control | 0.300 | 0.871 |
-| control × xT without reachability (Fernández-style) | 0.298 | 0.863 |
-| raw space conceded (m²) | 0.309 | 0.850 |
-
-- **The pre-declared test failed.** With xT as the danger map, TC beats every other space
-  measure but not ball location: the defense's control adds nothing measurable beyond where
-  the ball is, and plain distance to goal does best.
-- **With shooting danger as the map, the defense shows up.** Using "xG of a typical shot from
-  here" instead of xT, chosen inside each training fold (it won all 20), TC beats ball
-  distance (log loss 0.277) and beats its own ball-location-only version (95% interval of the
-  difference −0.007 to −0.001). This was found after the main test, so treat it as a strong
-  lead rather than a confirmed result.
-- The same holds frame by frame for a shot within the next 5 s.
-
-What we did next, and the confirmation on independent data, are in the next section.
-
-## The defense's cover, tested on independent data
-
-**Why the product failed.** TC = RD × (1 − cover) gives the ball's situation and the share
-the defense leaves uncovered the same weight. Fitted freely in a model of a shot within 5 s,
-the situation carries about 2.4 times the weight: coefficients 2.32 vs 0.96 on the log
-scale with the xT map ([reports/w6_two_part.md](reports/w6_two_part.md)). So the defense's
-share, **cover**, gets its own coefficient. This is the two-part model in `dsv.defense`:
-
-    logit P(shot within 5 s) = controls + f(ball situation) + β · logit(cover)
-
-**The test**, written down and committed before it was run
-([reports/preregistration.md](reports/preregistration.md)), used the seven open DFL/Sportec
-matches: Bundesliga and 2. Bundesliga, optical tracking. Every ingredient was frozen from
-the SkillCorner fits ([reports/w6_confirmation.md](reports/w6_confirmation.md)).
-
-| pre-registered test (DFL) | held-out log loss, without → with cover | difference [95%] | verdict |
-|---|---|---|---|
-| **primary:** shot within 5 s, cover (xT) | 0.0832 → 0.0821 | −0.0011 [−0.0019, −0.00002] | confirmed, narrowly |
-| shot within 5 s, cover (xG from here) | 0.0832 → 0.0824 | −0.0008 [−0.0014, −0.0001] | confirmed |
-| ball into the box within 5 s | 0.1665 → 0.1636 | −0.0029 [−0.0043, −0.0014] | confirmed |
-| per possession, cover at the moment of peak danger | 0.1612 → 0.1579 | −0.0033 [−0.0066, +0.0005] | same direction, not confirmed |
-| fitted on SkillCorner, scored on DFL without refitting | 0.0830 → 0.0822 | −0.0009 [−0.0016, +0.0002] | same direction, not confirmed |
-
-- **The main result holds in another league with another tracking system:** at a given
-  ball situation, more defensive cover means fewer shots and fewer entries into the box.
-  The cover coefficient is similar (−0.75 on DFL, −0.94 on SkillCorner). The gain is
-  smaller (−0.0011 vs −0.0027 in log loss).
-- **The possession-level tests point the same way but are not confirmed.** Seven matches
-  give only 117 possessions with a shot. The A-League data show the same test clearly
-  (−0.0060 [−0.0105, −0.0015]), but those data had already been seen.
-- **Cover counts at the critical moment.** Averaged over a whole possession, it adds
-  nothing.
-
-**Who loses the cover** ([reports/w6_attribution.md](reports/w6_attribution.md)). Cover
-splits exactly across defenders (`dsv.attribution`). We checked this against SkillCorner's
-flags for pressing defenders who were beaten (327 of 15,672 engagements):
-
-- After a beaten press, the share the whole defense leaves uncovered jumps (+0.28 on the
-  log scale, vs +0.05 when no outcome is flagged).
-- The presser's own lost share hardly singles them out (AUC 0.56). Most of the cover lost
-  belongs to the teammates behind the press.
-
-Judging the press itself is the job of the counterfactual (Layer 3), not attribution.
-
-**Using the DFL data** (Bassek, Rein, Weber & Memmert 2025, *Scientific Data* 12:195,
-CC BY 4.0; loaded through kloppy, `pip install kloppy`):
-
-```python
-from dsv import dfl
-meta, players, ball, possessions, shots = dfl.prepare_match("J03WMX", cache_dir="data/dfl/cache")
-```
-
-The open DFL event clock runs up to 2 s off the tracking clock, and each event adds about
-a second of manual timing jitter. `dfl.sync_offsets` and `dfl.dfl_shots` correct for this:
-159 of 171 shots end up on a frame with the shooter within 2.5 m of the ball (median
-distance from the recorded shot location 0.5 to 1.1 m by match). Team possessions come from
-the tracking feed's ball-possession flag (`dfl.dfl_possessions`).
-
-## What did the press do?
-
-Each of the 14,872 on-ball engagements SkillCorner records during an opponent possession (a
-defender pressing the ball carrier) is measured 3 s after the decision to press. The
-comparison is with typical play from the same situation, in the two-part model's chance of
-a shot ([reports/w7_pressing.md](reports/w7_pressing.md), `dsv.counterfactual`). There are
-two parts:
-
-- **On the ball:** is the ball less dangerous than usual, or won, or out of play?
-- **In the shape:** does the defense cover the danger better than a typical defense would,
-  with the ball where it now is?
-
-| SkillCorner outcome | presses | on the ball | in the shape | total, shots prevented per 100 presses [95%] |
-|---|---|---|---|---|
-| beaten | 311 | −10.5 | −2.7 | −13.2 [−16.7, −9.6] |
-| reduced danger | 424 | +6.5 | −1.4 | +5.2 [+2.7, +7.7] |
-| stopped danger | 195 | +4.8 | −1.4 | +3.3 [+0.7, +6.1] |
-| forced backward | 871 | +1.4 | +0.3 | +1.7 [+1.4, +2.0] |
-| no flagged outcome | 13,071 | −1.2 | −0.1 | −1.3 [−1.6, −0.9] |
-
-- **The grades agree with SkillCorner's independent outcome flags.** A press that is beaten
-  also costs the shape: space opens behind it.
-- **Most presses work, a few fail badly.** 75% leave the attack worse off than typical, but
-  the average is slightly negative, pulled down by the beaten ones.
-- **The own third decides it,** where a press is the last line of defense. Far from goal the
-  immediate danger is small either way. The attacking value of winning the ball high isn't
-  counted.
-- **Players: role, not yet individual skill.** Raw values sort players by role
-  (centre-backs lowest). Even compared with presses of the same type in the same zone, a
-  player's two halves of presses agree only 0.10 within a position group. With 20 matches,
-  individual pressing skill can't yet be separated from noise.
-- **The brief's "what if only the presser had held?" is computed but not used as the
-  grade.** The teammates who shifted to cover stay in place in that world, so a presser
-  who holds only duplicates their cover.
-
-## SkillCorner open data: things to know
-
-Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_audit.md)).
-`dsv.data` handles each of these.
-
-- **Positions are often extrapolated, not observed.** The public tracking file carries all 22
-  players in every frame, but only about 57% of positions are detected (49–66% per match).
-  No frame has all 22 detected. Detection falls with distance from the ball, from about 90%
-  within 5 m to almost nothing beyond 60 m. Use the per-position `is_detected` flag.
-- **Defenders are well tracked where it matters.** Whole-match detection of center backs is
-  about 46% and of goalkeepers 15–20%, but when their team is defending with the ball in its
-  own third it is 90% and 63%. Condition on game situation before concluding a position is
-  unusable.
-- **You cannot judge offside from it.** For the 51 passes called offside to a receiver in the
-  opponents' half, the tracking puts that receiver in an offside position at the pass frame
-  only 12% of the time (6% even when the receiver was detected), while 1.5% of completed
-  passes look offside. Offside is decided by centimetres; broadcast positions along the pitch
-  are not that precise. Threat Conceded therefore has no offside rule
-  ([reports/w3_value.md](reports/w3_value.md)).
-- **Some frames have no detections at all** (replays, camera cuts) while the ball is still
-  flagged as detected.
-- **Goalkeepers have no position group of their own.** They are `position_group == "Other"`
-  along with substitutes; use `player_role.acronym == "GK"` (`dsv.data.player_group`).
-- **Pitch size varies by match**: 104, 105 or 106 m long (all 68 m wide). Read it from each
-  match's `pitch_length` rather than assuming 105 m.
-- **Teams switch ends at half-time.** `home_team_side` gives each period's direction;
-  `normalize_direction` makes the home team attack +x throughout.
-- **Event coordinates are rotated per event**: the event's own team always attacks +x,
-  whatever the period. `orient_events` maps them into the tracking frame.
-- **Events and tracking share one frame clock.** `frame_start` / `frame_end` index the
-  tracking file directly with no offset; event locations match tracking positions to a
-  median 0–0.26 m per match.
-- **There is no shot xG, and goals are not always shots.** Shots are `end_type == "shot"` on
-  `player_possession` events. The 20 final scores add up to 66 goals, but only 62 player
-  possessions are followed by `game_interruption_after == "goal_for"`, and 61 of those end
-  in a shot (the other ends in a pass: Perth's 68' winner in match 1925299). Reconcile goal
-  labels with the final score.
-- **The tracking file's possession flag** (`possession.group`) is empty in 27% of frames in
-  the match we checked and can flip on deflections; prefer the event layer for who is in
-  possession.
-- **Files contain non-ASCII names**: open them as UTF-8 (on Windows the default codec fails).
-
-## Setup and reproduction
-
-```
-py -m pip install -e .[dev]
-py scripts/00_fetch_data.py         # ~1.8 GB into data/ (tracking files are git-LFS on GitHub)
-py scripts/01_data_audit.py         # coverage audit, v95   -> reports/w1_data_audit.md
-py scripts/02_pitch_control.py      # pitch-control sanity  -> reports/w2_pitch_control.md
-py scripts/03_fit_pitch_control.py  # parameter fit, ~40 min -> reports/w2_parameter_fit.md
-py scripts/04_xg.py                 # xG (downloads StatsBomb shots, ~3 min) -> reports/w3_xg.md
-py scripts/05_value.py              # xT and ball transitions -> reports/w3_value.md
-py scripts/06_threat.py             # Threat Conceded, all matches, ~40 min -> reports/w4_threat.md
-py scripts/07_validation.py         # does it predict shots? -> reports/w5_validation.md
-py scripts/08_two_part.py           # ball situation + cover, exploratory -> reports/w6_two_part.md
-pip install kloppy                  # only for the independent DFL/Sportec data
-py scripts/09_dfl_threat.py         # Threat Conceded on the 7 open DFL matches, ~30 min
-py scripts/10_confirmation.py       # pre-registered confirmation -> reports/w6_confirmation.md
-py scripts/11_attribution.py        # who loses the cover, vs SkillCorner's beaten flags -> reports/w6_attribution.md
-py scripts/12_pressing.py           # what did each press do? ~15 min -> reports/w7_pressing.md
-py -m pytest
-```
-
-## Layout
-
-| path | what |
+| does the defense's cover predict what happens next? | held-out log loss difference [95%] |
 |---|---|
-| `dsv/data.py` | fetch, parse tracking / events / phases, direction normalization, kinematics, v95, coverage audit, event alignment, passes with destinations |
-| `dsv/pitchcontrol.py` | Spearman pitch control (grid and batched points), per-player vmax, detection-aware uncertainty, renormalized leave-one-out, parameter fitting |
-| `dsv/xg.py` | xG model: shared shot features for StatsBomb and SkillCorner, fitted coefficients |
-| `dsv/value.py` | expected threat, next-ball-location model, fitted surfaces |
-| `dsv/metrics.py` | log loss, Brier, AUC, calibration error, logistic baseline |
-| `dsv/viz.py` | pitch, player and surface plots |
-| `dsv/threat.py` | Threat Conceded per frame (with reachable danger and cover), team possessions, possession and team-match summaries |
-| `dsv/defense.py` | the two-part model: ball situation + the defense's cover, typical-cover counterfactual (shots prevented), moments of peak danger |
-| `dsv/attribution.py` | each defender's share of the cover, blame when cover collapses, leave-one-out |
-| `dsv/dfl.py` | the open DFL/Sportec matches in the same tables (needs kloppy): event/tracking clock sync, possessions, shots |
-| `dsv/counterfactual.py` | what a press did vs typical play (on the ball, in the shape); the first-order held-position comparison |
-| `scripts/` | runnable pipeline steps |
-| `reports/`, `figs/` | generated write-ups and figures |
+| shot within 5 s, moment by moment (308,004 frames) | −0.0026 [−0.0035, −0.0017] |
+| ball into the box within 5 s | −0.0037 [−0.0051, −0.0023] |
+| shot in the possession, cover at the moment of peak danger | −0.0054 [−0.0096, −0.0013] |
+| shot in the possession, cover averaged over the possession | −0.0003 [−0.0021, +0.0016] |
+
+- **At a given ball situation, more cover means fewer shots.** Each unit of cover on the
+  logit scale multiplies the odds of a shot in the next 5 s by 0.35.
+- **Defending is decided at the critical moment.** Cover at peak danger predicts shots;
+  cover averaged over a possession does not. It matters most when the defense is not set
+  (set plays, direct play, the finishing phase).
+- **Presses.** Measured against typical play, the grades agree with SkillCorner's own
+  outcome flags: a beaten press costs 13.1 shots per 100 [9.4, 16.7], presses that reduce
+  the danger save 5.1 and presses that force the ball back 1.6. Three in four presses
+  leave the attack worse off than typical; the losses come from the own third.
+- **What does not work yet.** Blaming the individual presser by lost cover does not single
+  out beaten presses (AUC 0.54), and players' pressing values are not stable within a
+  position over 20 matches (split-half 0.10). Role, not individual skill, is what the data
+  can measure.
+
+![A beaten press: the danger left open, each defender's share of the cover, and the chance of a shot](figs/w8_beaten.gif)
+
+## Conclusion
+
+The defense's cover of reachable danger predicts shots on held-out matches once it is kept
+apart from where the ball is. Multiplying the two, as most space-value metrics do, hid it:
+a lesson for anyone ranking or optimizing defenses with threat-weighted pitch control. The
+package ships every model fitted to the open data so others can score their own
+situations, and an interactive replay shows the measure moving through possessions. Next:
+more matches per player, to see whether individual defending skill becomes measurable.
+
+## Run it
+
+Python 3.10 or newer. In a clean environment:
+
+```
+git clone <this repository> && cd <repository>
+python -m pip install -e .
+python -m pip install notebook
+jupyter notebook submission.ipynb
+```
+
+[`submission.ipynb`](submission.ipynb) downloads one match (about 90 MB) straight from the
+[SkillCorner open data](https://github.com/SkillCorner/opendata) and replays a possession
+through the whole model in a few minutes, using the constants shipped in `dsv`. The
+20-match analysis (about three hours) is `python scripts/00_fetch_data.py` followed by
+scripts `01` to `14`, each writing a report to [`reports/`](reports). Commands, every model
+and its validation, and notes on the open data: [docs/RESEARCH.md](docs/RESEARCH.md).
+
+## Repository
+
+`dsv/` the package (pitch control, xG, xT, threat, two-part model, attribution, pressing),
+`scripts/` the pipeline, `explorer/` the interactive replay, `reports/` and `figs/` the
+outputs, `tests/` the tests. MIT licence ([LICENSE.md](LICENSE.md)). Data: SkillCorner open
+data, loaded from its GitHub repository and not included here.
