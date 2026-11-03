@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viz = ["mplsoccer"]
+confirm = ["kloppy>=3.15"]   # open DFL/Sportec data for the independent confirmation
 dev = ["pytest"]
 
 [tool.setuptools]

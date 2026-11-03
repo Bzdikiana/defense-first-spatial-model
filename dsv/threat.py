@@ -90,6 +90,7 @@ def frame_threat(state: PC.FrameState, attacking_home: bool, grid: PC.Grid, meta
         the pitch's total xT (a Fernandez-style space value);
     tc_voronoi: TC with "nearest player wins" in place of pitch control;
     tc_<name>: TC with each alternative danger surface or transition model;
+    rd_<name>: reachable danger with each alternative danger surface;
     def_goal_side: defenders between the ball and their own goal line.
     """
     prm = model.params
@@ -128,6 +129,7 @@ def frame_threat(state: PC.FrameState, attacking_home: bool, grid: PC.Grid, meta
         for name in comparisons.values:
             v = comparisons.value(name, cells_att, L, W)
             out[f"tc_{name}"] = float((a * v * pc_att).sum())
+            out[f"rd_{name}"] = float((a * v).sum())
         for name, trans in comparisons.transitions.items():
             out[f"tc_{name}"] = float((_transition_probs(trans, s * state.ball, cells_att, L, W) * xt * pc_att).sum())
     return out

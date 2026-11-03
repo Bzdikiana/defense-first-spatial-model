@@ -114,6 +114,8 @@ def test_comparison_measures():
     assert 0 <= r["tc_no_access"] <= 1
     assert r["tc_same"] == pytest.approx(r["tc"], rel=1e-9)       # same transition -> same TC
     assert r["tc_flat"] <= 0.05 + 1e-9
+    assert r["rd_flat"] == pytest.approx(0.05)                      # A sums to 1
+    assert 0 <= r["tc_flat"] <= r["rd_flat"]
     assert 0 < r["space_m2"] < 105 * 68
     only_att = state([[20, 5], [40, -10]], [True, True], ball=(20, 5))
     r = T.frame_threat(only_att, True, GRID, Meta(), comparisons=comps)
