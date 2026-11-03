@@ -3,7 +3,9 @@
 A defense-first spatial model on SkillCorner open data (A-League 2024/25, 20 matches):
 how much dangerous space a team concedes over time (Threat Conceded), which defenders
 are responsible, and whether specific defensive actions were the right call.
-The design is in [analytics-cup-brief.md](analytics-cup-brief.md).
+The design is in [analytics-cup-brief.md](analytics-cup-brief.md). The main finding (at a
+given ball situation, more defensive cover means fewer shots) was pre-registered and
+confirmed on independent data, the open DFL/Sportec matches.
 
 ## Pitch control fitted to SkillCorner open data
 
@@ -154,6 +156,66 @@ controls for every measure, scored on held-out matches
   lead rather than a confirmed result.
 - The same holds frame by frame for a shot within the next 5 s.
 
+What we did next, and the confirmation on independent data, are in the next section.
+
+## The defense's cover, tested on independent data
+
+**Why the product failed.** TC = RD × (1 − cover) gives the ball's situation and the share
+the defense leaves uncovered the same weight. Fitted freely in a model of a shot within 5 s,
+the situation carries about 2.4 times the weight: coefficients 2.32 vs 0.96 on the log
+scale with the xT map ([reports/w6_two_part.md](reports/w6_two_part.md)). So the defense's
+share, **cover**, gets its own coefficient. This is the two-part model in `dsv.defense`:
+
+    logit P(shot within 5 s) = controls + f(ball situation) + β · logit(cover)
+
+**The test**, written down and committed before it was run
+([reports/preregistration.md](reports/preregistration.md)), used the seven open DFL/Sportec
+matches: Bundesliga and 2. Bundesliga, optical tracking. Every ingredient was frozen from
+the SkillCorner fits ([reports/w6_confirmation.md](reports/w6_confirmation.md)).
+
+| pre-registered test (DFL) | held-out log loss, without → with cover | difference [95%] | verdict |
+|---|---|---|---|
+| **primary:** shot within 5 s, cover (xT) | 0.0832 → 0.0821 | −0.0011 [−0.0019, −0.00002] | confirmed, narrowly |
+| shot within 5 s, cover (xG from here) | 0.0832 → 0.0824 | −0.0008 [−0.0014, −0.0001] | confirmed |
+| ball into the box within 5 s | 0.1665 → 0.1636 | −0.0029 [−0.0043, −0.0014] | confirmed |
+| per possession, cover at the moment of peak danger | 0.1612 → 0.1579 | −0.0033 [−0.0066, +0.0005] | same direction, not confirmed |
+| fitted on SkillCorner, scored on DFL without refitting | 0.0830 → 0.0822 | −0.0009 [−0.0016, +0.0002] | same direction, not confirmed |
+
+- **The main result holds in another league with another tracking system:** at a given
+  ball situation, more defensive cover means fewer shots and fewer entries into the box.
+  The cover coefficient is similar (−0.75 on DFL, −0.94 on SkillCorner). The gain is
+  smaller (−0.0011 vs −0.0027 in log loss).
+- **The possession-level tests point the same way but are not confirmed.** Seven matches
+  give only 117 possessions with a shot. The A-League data show the same test clearly
+  (−0.0060 [−0.0105, −0.0015]), but those data had already been seen.
+- **Cover counts at the critical moment.** Averaged over a whole possession, it adds
+  nothing.
+
+**Who loses the cover** ([reports/w6_attribution.md](reports/w6_attribution.md)). Cover
+splits exactly across defenders (`dsv.attribution`). We checked this against SkillCorner's
+flags for pressing defenders who were beaten (327 of 15,672 engagements):
+
+- After a beaten press, the share the whole defense leaves uncovered jumps (+0.28 on the
+  log scale, vs +0.05 when no outcome is flagged).
+- The presser's own lost share hardly singles them out (AUC 0.56). Most of the cover lost
+  belongs to the teammates behind the press.
+
+Judging the press itself is the job of the counterfactual (Layer 3), not attribution.
+
+**Using the DFL data** (Bassek, Rein, Weber & Memmert 2025, *Scientific Data* 12:195,
+CC BY 4.0; loaded through kloppy, `pip install kloppy`):
+
+```python
+from dsv import dfl
+meta, players, ball, possessions, shots = dfl.prepare_match("J03WMX", cache_dir="data/dfl/cache")
+```
+
+The open DFL event clock runs up to 2 s off the tracking clock, and each event adds about
+a second of manual timing jitter. `dfl.sync_offsets` and `dfl.dfl_shots` correct for this:
+159 of 171 shots end up on a frame with the shooter within 2.5 m of the ball (median
+distance from the recorded shot location 0.5 to 1.1 m by match). Team possessions come from
+the tracking feed's ball-possession flag (`dfl.dfl_possessions`).
+
 ## SkillCorner open data: things to know
 
 Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_audit.md)).
@@ -208,6 +270,11 @@ py scripts/04_xg.py                 # xG (downloads StatsBomb shots, ~3 min) -> 
 py scripts/05_value.py              # xT and ball transitions -> reports/w3_value.md
 py scripts/06_threat.py             # Threat Conceded, all matches, ~40 min -> reports/w4_threat.md
 py scripts/07_validation.py         # does it predict shots? -> reports/w5_validation.md
+py scripts/08_two_part.py           # ball situation + cover, exploratory -> reports/w6_two_part.md
+pip install kloppy                  # only for the independent DFL/Sportec data
+py scripts/09_dfl_threat.py         # Threat Conceded on the 7 open DFL matches, ~30 min
+py scripts/10_confirmation.py       # pre-registered confirmation -> reports/w6_confirmation.md
+py scripts/11_attribution.py        # who loses the cover, vs SkillCorner's beaten flags -> reports/w6_attribution.md
 py -m pytest
 ```
 
@@ -222,7 +289,9 @@ py -m pytest
 | `dsv/metrics.py` | log loss, Brier, AUC, calibration error, logistic baseline |
 | `dsv/viz.py` | pitch, player and surface plots |
 | `dsv/threat.py` | Threat Conceded per frame (with reachable danger and cover), team possessions, possession and team-match summaries |
-| `dsv/attribution.py` | Week 6: per-defender suppression and beaten attribution |
+| `dsv/defense.py` | the two-part model: ball situation + the defense's cover, typical-cover counterfactual (shots prevented), moments of peak danger |
+| `dsv/attribution.py` | each defender's share of the cover, blame when cover collapses, leave-one-out |
+| `dsv/dfl.py` | the open DFL/Sportec matches in the same tables (needs kloppy): event/tracking clock sync, possessions, shots |
 | `dsv/counterfactual.py` | Week 7: alternative actions, DDV, pressing cost-benefit |
 | `scripts/` | runnable pipeline steps |
 | `reports/`, `figs/` | generated write-ups and figures |

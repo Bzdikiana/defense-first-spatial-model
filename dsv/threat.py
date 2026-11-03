@@ -79,6 +79,18 @@ def _transition_probs(trans: V.TransitionModel, ball_att, cells_att, length, wid
     return a / a.sum()
 
 
+def player_control(state: PC.FrameState, cells: np.ndarray, prm: PC.PCParams) -> np.ndarray:
+    """Each player's pitch control at each cell, (n_cells, n_players), with
+    the fast skip-ahead integration used for match-long computation."""
+    n = len(state.player_id)
+    tau = PC._arrival_times(state.pos, state.vel, state.vmax, cells[:, None, :], prm.t_react)
+    t_ball = np.linalg.norm(cells - state.ball, axis=-1) / prm.ball_speed
+    lam = np.ascontiguousarray(np.broadcast_to(PC._rates(state.is_gk, prm), (len(cells), n)))
+    alpha = np.ascontiguousarray(np.broadcast_to(
+        np.broadcast_to(PC._alpha(state.detected, prm), (n,)), (len(cells), n)))
+    return PC._integrate_rows(tau, t_ball, lam, alpha, prm)
+
+
 def frame_threat(state: PC.FrameState, attacking_home: bool, grid: PC.Grid, meta: MatchMeta,
                  model: ThreatModel = ThreatModel(), comparisons: Optional[Comparisons] = None) -> dict:
     """TC, reachable danger, cover, and the share of the defense's weighted
@@ -101,13 +113,7 @@ def frame_threat(state: PC.FrameState, attacking_home: bool, grid: PC.Grid, meta
     a = _transition_probs(model.transition, s * state.ball, cells_att, L, W)
     xt = V.zone_value_at(model.xt, cells_att[:, 0] / L + 0.5, cells_att[:, 1] / W + 0.5)
     w = a * xt
-    n = len(state.player_id)
-    tau = PC._arrival_times(state.pos, state.vel, state.vmax, cells[:, None, :], prm.t_react)
-    t_ball = np.linalg.norm(cells - state.ball, axis=-1) / prm.ball_speed
-    lam = np.ascontiguousarray(np.broadcast_to(PC._rates(state.is_gk, prm), (len(cells), n)))
-    alpha = np.ascontiguousarray(np.broadcast_to(
-        np.broadcast_to(PC._alpha(state.detected, prm), (n,)), (len(cells), n)))
-    pc = PC._integrate_rows(tau, t_ball, lam, alpha, prm)
+    pc = player_control(state, cells, prm)
     att = state.is_home == attacking_home
     pc_att = pc[:, att].sum(axis=1)
     pc_def = pc[:, ~att].sum(axis=1)
