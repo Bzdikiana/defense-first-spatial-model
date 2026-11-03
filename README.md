@@ -216,6 +216,41 @@ a second of manual timing jitter. `dfl.sync_offsets` and `dfl.dfl_shots` correct
 distance from the recorded shot location 0.5 to 1.1 m by match). Team possessions come from
 the tracking feed's ball-possession flag (`dfl.dfl_possessions`).
 
+## What did the press do?
+
+Each of the 14,872 on-ball engagements SkillCorner records during an opponent possession (a
+defender pressing the ball carrier) is measured 3 s after the decision to press. The
+comparison is with typical play from the same situation, in the two-part model's chance of
+a shot ([reports/w7_pressing.md](reports/w7_pressing.md), `dsv.counterfactual`). There are
+two parts:
+
+- **On the ball:** is the ball less dangerous than usual, or won, or out of play?
+- **In the shape:** does the defense cover the danger better than a typical defense would,
+  with the ball where it now is?
+
+| SkillCorner outcome | presses | on the ball | in the shape | total, shots prevented per 100 presses [95%] |
+|---|---|---|---|---|
+| beaten | 311 | −10.5 | −2.7 | −13.2 [−16.7, −9.6] |
+| reduced danger | 424 | +6.5 | −1.4 | +5.2 [+2.7, +7.7] |
+| stopped danger | 195 | +4.8 | −1.4 | +3.3 [+0.7, +6.1] |
+| forced backward | 871 | +1.4 | +0.3 | +1.7 [+1.4, +2.0] |
+| no flagged outcome | 13,071 | −1.2 | −0.1 | −1.3 [−1.6, −0.9] |
+
+- **The grades agree with SkillCorner's independent outcome flags.** A press that is beaten
+  also costs the shape: space opens behind it.
+- **Most presses work, a few fail badly.** 75% leave the attack worse off than typical, but
+  the average is slightly negative, pulled down by the beaten ones.
+- **The own third decides it,** where a press is the last line of defense. Far from goal the
+  immediate danger is small either way. The attacking value of winning the ball high isn't
+  counted.
+- **Players: role, not yet individual skill.** Raw values sort players by role
+  (centre-backs lowest). Even compared with presses of the same type in the same zone, a
+  player's two halves of presses agree only 0.10 within a position group. With 20 matches,
+  individual pressing skill can't yet be separated from noise.
+- **The brief's "what if only the presser had held?" is computed but not used as the
+  grade.** The teammates who shifted to cover stay in place in that world, so a presser
+  who holds only duplicates their cover.
+
 ## SkillCorner open data: things to know
 
 Found while auditing all 20 matches ([reports/w1_data_audit.md](reports/w1_data_audit.md)).
@@ -275,6 +310,7 @@ pip install kloppy                  # only for the independent DFL/Sportec data
 py scripts/09_dfl_threat.py         # Threat Conceded on the 7 open DFL matches, ~30 min
 py scripts/10_confirmation.py       # pre-registered confirmation -> reports/w6_confirmation.md
 py scripts/11_attribution.py        # who loses the cover, vs SkillCorner's beaten flags -> reports/w6_attribution.md
+py scripts/12_pressing.py           # what did each press do? ~15 min -> reports/w7_pressing.md
 py -m pytest
 ```
 
@@ -292,6 +328,6 @@ py -m pytest
 | `dsv/defense.py` | the two-part model: ball situation + the defense's cover, typical-cover counterfactual (shots prevented), moments of peak danger |
 | `dsv/attribution.py` | each defender's share of the cover, blame when cover collapses, leave-one-out |
 | `dsv/dfl.py` | the open DFL/Sportec matches in the same tables (needs kloppy): event/tracking clock sync, possessions, shots |
-| `dsv/counterfactual.py` | Week 7: alternative actions, DDV, pressing cost-benefit |
+| `dsv/counterfactual.py` | what a press did vs typical play (on the ball, in the shape); the first-order held-position comparison |
 | `scripts/` | runnable pipeline steps |
 | `reports/`, `figs/` | generated write-ups and figures |
